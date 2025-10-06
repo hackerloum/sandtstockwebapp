@@ -254,16 +254,16 @@ function AppContent() {
   ];
 
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
-  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const navRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (moreMenuRef.current && !moreMenuRef.current.contains(event.target as Node)) {
+    const handlePointerDown = (event: Event) => {
+      if (navRef.current && !navRef.current.contains(event.target as Node)) {
         setIsMoreMenuOpen(false);
       }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, []);
 
   const visibleMainTabs = mainTabs.filter(tab => hasPermission(tab.permission));
@@ -271,7 +271,7 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm border-b border-gray-200">
+      <nav ref={navRef} className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
             {/* Logo */}
@@ -304,7 +304,7 @@ function AppContent() {
 
               {/* More Menu */}
               {visibleSecondaryTabs.length > 0 && (
-                <div className="relative" ref={moreMenuRef}>
+                <div className="relative">
                   <button
                     onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
                     className={`px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors ${
@@ -346,7 +346,7 @@ function AppContent() {
             </div>
 
             {/* Mobile Menu Button */}
-            <div className="md:hidden">
+            <div className="relative md:hidden">
               <button
                 onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
                 className="p-2 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100"
