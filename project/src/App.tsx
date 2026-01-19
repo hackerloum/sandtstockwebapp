@@ -37,6 +37,12 @@ import {
 
 type ActiveTab = 'dashboard' | 'products' | 'add-product' | 'edit-product' | 'movements' | 'orders' | 'purchase-orders' | 'reports' | 'product-reports' | 'activity' | 'debug';
 
+type ProductListScrollState = {
+  scrollOffset: number;
+  anchorId?: string;
+  anchorOffset?: number;
+};
+
 function AppContent() {
   const { user, logout, hasPermission } = useAuth();
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
@@ -54,10 +60,7 @@ function AppContent() {
   const [isProductDetailOpen, setIsProductDetailOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
-  const [productListScrollState, setProductListScrollState] = useState<{
-    scrollY: number;
-    listTop: number;
-  } | null>(null);
+  const [productListScrollState, setProductListScrollState] = useState<ProductListScrollState | null>(null);
   const [shouldRestoreProductListScroll, setShouldRestoreProductListScroll] = useState(false);
 
   // Fetch data from Supabase
@@ -103,17 +106,36 @@ function AppContent() {
     fetchData();
   }, []);
 
-  const getProductListTop = () => {
+  const getProductListContainer = () => {
     if (typeof window === 'undefined') {
-      return 0;
+      return null;
     }
 
     const listElement = document.querySelector('[data-product-list="container"]');
-    if (!listElement) {
+    return listElement;
+  };
+
+  const getProductListTop = () => {
+    const listElement = getProductListContainer();
+    if (!listElement || typeof window === 'undefined') {
       return 0;
     }
 
     return listElement.getBoundingClientRect().top + window.scrollY;
+  };
+
+  const getProductListRowOffset = (productId: string) => {
+    const listElement = getProductListContainer();
+    if (!listElement) {
+      return null;
+    }
+
+    const rowElement = listElement.querySelector(`[data-row-id="${productId}"]`);
+    if (!rowElement) {
+      return null;
+    }
+
+    return rowElement.getBoundingClientRect().top;
   };
 
   useEffect(() => {
@@ -126,11 +148,32 @@ function AppContent() {
     }
 
     const restoreScroll = () => {
-      const currentListTop = getProductListTop();
-      const offset = currentListTop - productListScrollState.listTop;
-      const targetScrollY = Math.max(0, productListScrollState.scrollY + offset);
+      const listElement = getProductListContainer();
+      let restored = false;
 
-      window.scrollTo(0, targetScrollY);
+      if (
+        listElement &&
+        productListScrollState.anchorId &&
+        typeof productListScrollState.anchorOffset === 'number'
+      ) {
+        const rowElement = listElement.querySelector(
+          `[data-row-id="${productListScrollState.anchorId}"]`
+        );
+
+        if (rowElement) {
+          const rowDocTop = rowElement.getBoundingClientRect().top + window.scrollY;
+          const targetScrollY = Math.max(0, rowDocTop - productListScrollState.anchorOffset);
+          window.scrollTo(0, targetScrollY);
+          restored = true;
+        }
+      }
+
+      if (!restored) {
+        const listTop = getProductListTop();
+        const targetScrollY = Math.max(0, listTop + productListScrollState.scrollOffset);
+        window.scrollTo(0, targetScrollY);
+      }
+
       setShouldRestoreProductListScroll(false);
     };
 
@@ -177,9 +220,13 @@ function AppContent() {
 
   const handleEditProduct = (product: Product) => {
     if (activeTab === 'products' && typeof window !== 'undefined') {
+      const listTop = getProductListTop();
+      const rowOffset = getProductListRowOffset(product.id);
+
       setProductListScrollState({
-        scrollY: window.scrollY,
-        listTop: getProductListTop()
+        scrollOffset: Math.max(0, window.scrollY - listTop),
+        anchorId: product.id,
+        anchorOffset: rowOffset ?? undefined
       });
       setShouldRestoreProductListScroll(true);
     }
