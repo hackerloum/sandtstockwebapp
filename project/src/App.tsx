@@ -54,6 +54,8 @@ function AppContent() {
   const [isProductDetailOpen, setIsProductDetailOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
+  const [productListScrollY, setProductListScrollY] = useState(0);
+  const [shouldRestoreProductListScroll, setShouldRestoreProductListScroll] = useState(false);
 
   // Fetch data from Supabase
   useEffect(() => {
@@ -98,6 +100,23 @@ function AppContent() {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    if (activeTab !== 'products' || !shouldRestoreProductListScroll) {
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const restoreScroll = () => {
+      window.scrollTo(0, productListScrollY);
+      setShouldRestoreProductListScroll(false);
+    };
+
+    requestAnimationFrame(restoreScroll);
+  }, [activeTab, productListScrollY, shouldRestoreProductListScroll]);
+
   const handleSaveProduct = async (product: Omit<Product, 'id' | 'created_at' | 'updated_at'>) => {
     console.log('handleSaveProduct called with:', product);
     console.log('Current stock in product data:', product.current_stock);
@@ -137,6 +156,11 @@ function AppContent() {
   };
 
   const handleEditProduct = (product: Product) => {
+    if (activeTab === 'products' && typeof window !== 'undefined') {
+      setProductListScrollY(window.scrollY);
+      setShouldRestoreProductListScroll(true);
+    }
+
     setEditingProduct(product);
     setActiveTab('edit-product');
   };
