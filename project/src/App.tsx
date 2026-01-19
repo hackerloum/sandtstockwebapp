@@ -43,6 +43,11 @@ type ProductListScrollState = {
   anchorOffset?: number;
 };
 
+type ProductListAnchor = {
+  id: string;
+  offset: number;
+};
+
 function AppContent() {
   const { user, logout, hasPermission } = useAuth();
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
@@ -62,6 +67,7 @@ function AppContent() {
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
   const [productListScrollState, setProductListScrollState] = useState<ProductListScrollState | null>(null);
   const [shouldRestoreProductListScroll, setShouldRestoreProductListScroll] = useState(false);
+  const restoreAttemptsRef = useRef(0);
 
   // Fetch data from Supabase
   useEffect(() => {
@@ -138,6 +144,35 @@ function AppContent() {
     return rowElement.getBoundingClientRect().top;
   };
 
+  const getProductListAnchor = (): ProductListAnchor | null => {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    const listElement = getProductListContainer();
+    if (!listElement) {
+      return null;
+    }
+
+    const rows = Array.from(listElement.querySelectorAll('[data-row-id]'));
+    let anchor: ProductListAnchor | null = null;
+
+    rows.forEach((row) => {
+      const rect = row.getBoundingClientRect();
+      const rowId = row.getAttribute('data-row-id');
+
+      if (!rowId || rect.bottom <= 0 || rect.top >= window.innerHeight) {
+        return;
+      }
+
+      if (!anchor || rect.top < anchor.offset) {
+        anchor = { id: rowId, offset: rect.top };
+      }
+    });
+
+    return anchor;
+  };
+
   useEffect(() => {
     if (activeTab !== 'products' || !shouldRestoreProductListScroll || !productListScrollState) {
       return;
@@ -148,8 +183,11 @@ function AppContent() {
     }
 
     const restoreScroll = () => {
+      const maxAttempts = 6;
+      const tolerance = 2;
       const listElement = getProductListContainer();
-      let restored = false;
+      let targetScrollY = window.scrollY;
+      let usedAnchor = false;
 
       if (
         listElement &&
@@ -162,18 +200,35 @@ function AppContent() {
 
         if (rowElement) {
           const rowDocTop = rowElement.getBoundingClientRect().top + window.scrollY;
-          const targetScrollY = Math.max(0, rowDocTop - productListScrollState.anchorOffset);
-          window.scrollTo(0, targetScrollY);
-          restored = true;
+          targetScrollY = Math.max(0, rowDocTop - productListScrollState.anchorOffset);
+          usedAnchor = true;
         }
       }
 
-      if (!restored) {
+      if (!usedAnchor) {
         const listTop = getProductListTop();
-        const targetScrollY = Math.max(0, listTop + productListScrollState.scrollOffset);
-        window.scrollTo(0, targetScrollY);
+        targetScrollY = Math.max(0, listTop + productListScrollState.scrollOffset);
       }
 
+      window.scrollTo(0, targetScrollY);
+
+      const currentAnchorDelta = usedAnchor
+        ? listElement
+          ?.querySelector(`[data-row-id="${productListScrollState.anchorId}"]`)
+          ?.getBoundingClientRect().top - productListScrollState.anchorOffset
+        : 0;
+
+      const isSettled =
+        Math.abs(window.scrollY - targetScrollY) <= tolerance &&
+        (!usedAnchor || Math.abs(currentAnchorDelta || 0) <= tolerance);
+
+      if (!isSettled && restoreAttemptsRef.current < maxAttempts) {
+        restoreAttemptsRef.current += 1;
+        requestAnimationFrame(restoreScroll);
+        return;
+      }
+
+      restoreAttemptsRef.current = 0;
       setShouldRestoreProductListScroll(false);
     };
 
@@ -222,11 +277,12 @@ function AppContent() {
     if (activeTab === 'products' && typeof window !== 'undefined') {
       const listTop = getProductListTop();
       const rowOffset = getProductListRowOffset(product.id);
+      const anchor = getProductListAnchor();
 
       setProductListScrollState({
         scrollOffset: Math.max(0, window.scrollY - listTop),
-        anchorId: product.id,
-        anchorOffset: rowOffset ?? undefined
+        anchorId: anchor?.id || product.id,
+        anchorOffset: anchor?.offset ?? rowOffset ?? undefined
       });
       setShouldRestoreProductListScroll(true);
     }
