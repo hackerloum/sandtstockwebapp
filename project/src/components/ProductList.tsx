@@ -695,7 +695,7 @@ export const ProductList: React.FC<ProductListProps> = ({
     filters.isTester !== null;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-product-list="container">
       <PageHeader
         title="Products"
         subtitle={`${sortedProducts.length} of ${products.length} products`}

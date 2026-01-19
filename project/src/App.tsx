@@ -54,7 +54,10 @@ function AppContent() {
   const [isProductDetailOpen, setIsProductDetailOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
-  const [productListScrollY, setProductListScrollY] = useState(0);
+  const [productListScrollState, setProductListScrollState] = useState<{
+    scrollY: number;
+    listTop: number;
+  } | null>(null);
   const [shouldRestoreProductListScroll, setShouldRestoreProductListScroll] = useState(false);
 
   // Fetch data from Supabase
@@ -100,8 +103,21 @@ function AppContent() {
     fetchData();
   }, []);
 
+  const getProductListTop = () => {
+    if (typeof window === 'undefined') {
+      return 0;
+    }
+
+    const listElement = document.querySelector('[data-product-list="container"]');
+    if (!listElement) {
+      return 0;
+    }
+
+    return listElement.getBoundingClientRect().top + window.scrollY;
+  };
+
   useEffect(() => {
-    if (activeTab !== 'products' || !shouldRestoreProductListScroll) {
+    if (activeTab !== 'products' || !shouldRestoreProductListScroll || !productListScrollState) {
       return;
     }
 
@@ -110,12 +126,16 @@ function AppContent() {
     }
 
     const restoreScroll = () => {
-      window.scrollTo(0, productListScrollY);
+      const currentListTop = getProductListTop();
+      const offset = currentListTop - productListScrollState.listTop;
+      const targetScrollY = Math.max(0, productListScrollState.scrollY + offset);
+
+      window.scrollTo(0, targetScrollY);
       setShouldRestoreProductListScroll(false);
     };
 
     requestAnimationFrame(restoreScroll);
-  }, [activeTab, productListScrollY, shouldRestoreProductListScroll]);
+  }, [activeTab, productListScrollState, shouldRestoreProductListScroll]);
 
   const handleSaveProduct = async (product: Omit<Product, 'id' | 'created_at' | 'updated_at'>) => {
     console.log('handleSaveProduct called with:', product);
@@ -157,7 +177,10 @@ function AppContent() {
 
   const handleEditProduct = (product: Product) => {
     if (activeTab === 'products' && typeof window !== 'undefined') {
-      setProductListScrollY(window.scrollY);
+      setProductListScrollState({
+        scrollY: window.scrollY,
+        listTop: getProductListTop()
+      });
       setShouldRestoreProductListScroll(true);
     }
 
