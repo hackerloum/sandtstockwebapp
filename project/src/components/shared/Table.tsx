@@ -115,6 +115,7 @@ export function Table<T extends { id: string }>({
           {data.map((item) => (
             <tr
               key={item[keyField as keyof T] as string}
+              data-row-id={String(item[keyField as keyof T])}
               className={`${
                 onRowClick ? 'cursor-pointer hover:bg-gray-50' : ''
               }`}
