@@ -284,7 +284,15 @@ export const ProductList: React.FC<ProductListProps> = ({
   const filteredProducts = useMemo(() => {
     console.log('ProductList: Filtering products with filters:', filters);
     console.log('ProductList: Starting with', extendedProducts.length, 'products');
-    
+
+    const isPriceFilterActive = filters.priceRange.min > 0 || filters.priceRange.max < maxPrice;
+    const isStockFilterActive = filters.stockRange.min > 0 || filters.stockRange.max < maxStock;
+
+    const toNumber = (value: unknown) => {
+      const numberValue = typeof value === 'number' ? value : Number(value);
+      return Number.isFinite(numberValue) ? numberValue : 0;
+    };
+
     const filtered = extendedProducts.filter(product => {
       // Search term matching (multiple fields)
       const searchLower = filters.searchTerm.toLowerCase();
@@ -311,11 +319,17 @@ export const ProductList: React.FC<ProductListProps> = ({
       const matchesBrand = filters.brandFilter === 'all' || 
         (product.brand?.name || product.brand_id || '') === filters.brandFilter;
 
-      // Price range filter
-      const matchesPrice = product.price >= filters.priceRange.min && product.price <= filters.priceRange.max;
+      // Price range filter (only apply when user sets a range)
+      const priceValue = toNumber(product.price ?? 0);
+      const matchesPrice = !isPriceFilterActive || (
+        priceValue >= filters.priceRange.min && priceValue <= filters.priceRange.max
+      );
 
-      // Stock range filter
-      const matchesStock = product.current_stock >= filters.stockRange.min && product.current_stock <= filters.stockRange.max;
+      // Stock range filter (only apply when user sets a range)
+      const stockValue = toNumber(product.current_stock ?? 0);
+      const matchesStock = !isStockFilterActive || (
+        stockValue >= filters.stockRange.min && stockValue <= filters.stockRange.max
+      );
 
       // Tester filter
       const matchesTester = filters.isTester === null || product.is_tester === filters.isTester;
@@ -340,8 +354,8 @@ export const ProductList: React.FC<ProductListProps> = ({
             category: product.category,
             product_type: product.product_type,
             brand: product.brand?.name || product.brand_id,
-            price: product.price,
-            current_stock: product.current_stock,
+            price: priceValue,
+            current_stock: stockValue,
             is_tester: product.is_tester
           }
         });
@@ -353,7 +367,7 @@ export const ProductList: React.FC<ProductListProps> = ({
     console.log('ProductList: Filtered products count:', filtered.length);
     console.log('ProductList: Products filtered out:', extendedProducts.length - filtered.length);
     return filtered;
-  }, [extendedProducts, filters]);
+  }, [extendedProducts, filters, maxPrice, maxStock]);
 
   // Sorting functionality
   const sortedProducts = useMemo(() => {
@@ -465,20 +479,6 @@ export const ProductList: React.FC<ProductListProps> = ({
       setSortDirection('asc');
     }
   }, [sortField]);
-
-  // Clear all filters
-  const clearFilters = useCallback(() => {
-    setFilters({
-      searchTerm: '',
-      statusFilter: 'all',
-      categoryFilter: 'all',
-      productTypeFilter: 'all',
-      brandFilter: 'all',
-      priceRange: { min: 0, max: maxPrice },
-      stockRange: { min: 0, max: maxStock },
-      isTester: null
-    });
-  }, [maxPrice, maxStock]);
 
   const columns = [
     {
@@ -841,16 +841,6 @@ export const ProductList: React.FC<ProductListProps> = ({
               >
                 {showAdvancedFilters ? 'Hide' : 'Advanced'} Filters
               </Button>
-              {hasActiveFilters && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  icon={<X className="w-4 h-4" />}
-                  onClick={clearFilters}
-                >
-                  Clear All
-                </Button>
-              )}
             </div>
 
             {/* Advanced Filters */}
@@ -959,20 +949,11 @@ export const ProductList: React.FC<ProductListProps> = ({
           {/* Results Summary */}
           {hasActiveFilters && (
             <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="flex items-center justify-between">
-                <div className="text-sm text-blue-800">
-                  Showing {sortedProducts.length} of {products.length} products
-                  {filters.searchTerm && (
-                    <span> matching "{filters.searchTerm}"</span>
-                  )}
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={clearFilters}
-                >
-                  Clear Filters
-                </Button>
+              <div className="text-sm text-blue-800">
+                Showing {sortedProducts.length} of {products.length} products
+                {filters.searchTerm && (
+                  <span> matching "{filters.searchTerm}"</span>
+                )}
               </div>
             </div>
           )}
