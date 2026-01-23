@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Search, Plus, Edit2, Trash2, Eye, Package, Filter, X, SortAsc, SortDesc, Clock, Download } from 'lucide-react';
 import { Product } from '../types';
 import { getStockStatus, getStockStatusColor, getStatusText, formatCurrency, formatWeight } from '../utils/stockUtils';
@@ -47,6 +47,7 @@ export const ProductList: React.FC<ProductListProps> = ({
   onViewProduct
 }) => {
   const { hasPermission, user } = useAuth();
+  const hasRestoredScrollRef = useRef(false);
   
   // Add debugging for permissions
   console.log('ProductList: Current user:', user?.username, 'Role:', user?.role);
@@ -99,6 +100,35 @@ export const ProductList: React.FC<ProductListProps> = ({
 
   // Cast products to ExtendedProduct for brand/supplier access
   const extendedProducts = products as ExtendedProduct[];
+
+  useEffect(() => {
+    if (hasRestoredScrollRef.current) return;
+
+    const storedScroll = sessionStorage.getItem('productListScrollY');
+    if (!storedScroll) {
+      hasRestoredScrollRef.current = true;
+      return;
+    }
+
+    const scrollY = Number(storedScroll);
+    if (!Number.isFinite(scrollY) || scrollY <= 0) {
+      hasRestoredScrollRef.current = true;
+      return;
+    }
+
+    if (extendedProducts.length === 0) return;
+
+    requestAnimationFrame(() => {
+      window.scrollTo(0, scrollY);
+      hasRestoredScrollRef.current = true;
+    });
+  }, [extendedProducts.length]);
+
+  useEffect(() => {
+    return () => {
+      sessionStorage.setItem('productListScrollY', String(window.scrollY));
+    };
+  }, []);
 
   // Export functions
   const handleExportAllProducts = () => {
