@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Search, Plus, Edit2, Trash2, Eye, Package, Filter, X, SortAsc, SortDesc, Clock, Download } from 'lucide-react';
 import { Product } from '../types';
-import { getStockStatus, getStockStatusColor, getStatusText, formatCurrency, formatWeight } from '../utils/stockUtils';
+import { getStockStatus, getStockStatusColor, getStatusText, formatCurrency, formatWeight, getUpdatedTimeline, getUpdatedTimelineLabel, getUpdatedTimelineBadgeClass } from '../utils/stockUtils';
 import { exportProductsToExcel, exportFilteredProductsToExcel } from '../utils/excelUtils';
 import { PageHeader, PageContainer, PageSection, EmptyState } from './shared/PageLayout';
 import { Button } from './shared/Button';
@@ -19,7 +19,7 @@ interface ProductListProps {
   onViewProduct: (product: Product) => void;
 }
 
-type SortField = 'commercial_name' | 'code' | 'current_stock' | 'price' | 'created_at' | 'product_type';
+type SortField = 'commercial_name' | 'code' | 'current_stock' | 'price' | 'created_at' | 'updated_at' | 'product_type';
 type SortDirection = 'asc' | 'desc';
 
 interface SearchFilters {
@@ -28,6 +28,7 @@ interface SearchFilters {
   categoryFilter: string;
   productTypeFilter: string;
   brandFilter: string;
+  updatedFilter: 'all' | 'today' | 'last_week';
   priceRange: { min: number; max: number };
   stockRange: { min: number; max: number };
   isTester: boolean | null;
@@ -81,6 +82,7 @@ export const ProductList: React.FC<ProductListProps> = ({
     categoryFilter: 'all',
     productTypeFilter: 'all',
     brandFilter: 'all',
+    updatedFilter: 'all',
     priceRange: { min: 0, max: 10000 },
     stockRange: { min: 0, max: 1000 },
     isTester: null
@@ -320,8 +322,15 @@ export const ProductList: React.FC<ProductListProps> = ({
       // Tester filter
       const matchesTester = filters.isTester === null || product.is_tester === filters.isTester;
 
+      // Updated timeline filter (today = updated today; last_week = today, yesterday, or last 7 days)
+      const timeline = getUpdatedTimeline(product.updated_at);
+      const matchesUpdated =
+        filters.updatedFilter === 'all' ||
+        (filters.updatedFilter === 'today' && timeline === 'today') ||
+        (filters.updatedFilter === 'last_week' && (timeline === 'today' || timeline === 'yesterday' || timeline === 'last_week'));
+
       const matches = matchesSearch && matchesStatus && matchesCategory && matchesProductType && 
-             matchesBrand && matchesPrice && matchesStock && matchesTester;
+             matchesBrand && matchesPrice && matchesStock && matchesTester && matchesUpdated;
              
       // Debug individual product filtering
       if (!matches) {
@@ -365,6 +374,15 @@ export const ProductList: React.FC<ProductListProps> = ({
       if (sortField === 'commercial_name' && a.brand?.name) {
         aValue = a.brand.name;
         bValue = b.brand?.name || b.brand_id;
+      }
+
+      // Handle date comparison for updated_at
+      if (sortField === 'updated_at') {
+        const aTime = aValue ? new Date(aValue).getTime() : 0;
+        const bTime = bValue ? new Date(bValue).getTime() : 0;
+        if (aTime < bTime) return sortDirection === 'asc' ? -1 : 1;
+        if (aTime > bTime) return sortDirection === 'asc' ? 1 : -1;
+        return 0;
       }
 
       // Handle string comparison
@@ -447,6 +465,7 @@ export const ProductList: React.FC<ProductListProps> = ({
       categoryFilter: 'all',
       productTypeFilter: 'all',
       brandFilter: 'all',
+      updatedFilter: 'all',
       priceRange: { min: 0, max: maxPrice },
       stockRange: { min: 0, max: maxStock },
       isTester: null
@@ -474,6 +493,7 @@ export const ProductList: React.FC<ProductListProps> = ({
       categoryFilter: 'all',
       productTypeFilter: 'all',
       brandFilter: 'all',
+      updatedFilter: 'all',
       priceRange: { min: 0, max: maxPrice },
       stockRange: { min: 0, max: maxStock },
       isTester: null
@@ -648,6 +668,28 @@ export const ProductList: React.FC<ProductListProps> = ({
           </div>
         </div>
       )
+    },
+    {
+      key: 'updated_at',
+      header: 'Updated',
+      sortable: true,
+      render: (product: ExtendedProduct) => {
+        const timeline = getUpdatedTimeline(product.updated_at);
+        const label = getUpdatedTimelineLabel(product.updated_at);
+        const badgeClass = getUpdatedTimelineBadgeClass(timeline);
+        return (
+          <div className="space-y-1">
+            <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded border ${badgeClass}`}>
+              {label}
+            </span>
+            {product.updated_at && (
+              <div className="text-xs text-gray-500" title={new Date(product.updated_at).toLocaleString()}>
+                {new Date(product.updated_at).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}
+              </div>
+            )}
+          </div>
+        );
+      }
     }
   ];
 
@@ -688,6 +730,7 @@ export const ProductList: React.FC<ProductListProps> = ({
     filters.categoryFilter !== 'all' || 
     filters.productTypeFilter !== 'all' || 
     filters.brandFilter !== 'all' || 
+    filters.updatedFilter !== 'all' ||
     filters.priceRange.min > 0 || 
     filters.priceRange.max < maxPrice || 
     filters.stockRange.min > 0 || 
@@ -832,6 +875,16 @@ export const ProductList: React.FC<ProductListProps> = ({
                 onChange={(e) => setFilters(prev => ({ ...prev, productTypeFilter: e.target.value }))}
                 options={productTypeOptions}
                 className="w-40"
+              />
+              <Select
+                value={filters.updatedFilter}
+                onChange={(e) => setFilters(prev => ({ ...prev, updatedFilter: e.target.value as 'all' | 'today' | 'last_week' }))}
+                options={[
+                  { value: 'all', label: 'Any update time' },
+                  { value: 'today', label: 'Updated today' },
+                  { value: 'last_week', label: 'Updated last 7 days' }
+                ]}
+                className="w-44"
               />
               <Button
                 variant="outline"
@@ -998,7 +1051,7 @@ export const ProductList: React.FC<ProductListProps> = ({
             <div className="mb-6 p-4 bg-white border border-gray-200 rounded-lg shadow-sm">
               <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0">
                 {/* Stock Statistics */}
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-7 gap-4">
                   <div className="text-center">
                     <div className="text-2xl font-bold text-green-600">
                       {sortedProducts.filter(p => (p.current_stock || 0) > (p.min_stock || 5)).length}
@@ -1026,6 +1079,20 @@ export const ProductList: React.FC<ProductListProps> = ({
                     </div>
                     <div className="text-sm text-gray-600">Total Products</div>
                     <div className="text-xs text-gray-400">All</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-emerald-600">
+                      {extendedProducts.filter(p => getUpdatedTimeline(p.updated_at) === 'today').length}
+                    </div>
+                    <div className="text-sm text-gray-600">Updated today</div>
+                    <div className="text-xs text-gray-400">Timeline</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-slate-600">
+                      {extendedProducts.filter(p => ['today', 'yesterday', 'last_week'].includes(getUpdatedTimeline(p.updated_at))).length}
+                    </div>
+                    <div className="text-sm text-gray-600">Last 7 days</div>
+                    <div className="text-xs text-gray-400">Timeline</div>
                   </div>
                   <div className="text-center">
                     <div className="text-2xl font-bold text-purple-600">

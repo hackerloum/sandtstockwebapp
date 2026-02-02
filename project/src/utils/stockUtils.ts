@@ -24,6 +24,45 @@ export const formatDate = (date: string | Date) => {
   }).format(typeof date === 'string' ? new Date(date) : date);
 };
 
+/** Timeline bucket for product updated_at: today, yesterday, last_week (last 7 days), or older */
+export type UpdatedTimeline = 'today' | 'yesterday' | 'last_week' | 'older';
+
+export const getUpdatedTimeline = (updatedAt: string | null | undefined): UpdatedTimeline => {
+  if (!updatedAt) return 'older';
+  const date = new Date(updatedAt);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+  const sevenDaysAgo = new Date(startOfToday);
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+  if (date >= startOfToday) return 'today';
+  if (date >= startOfYesterday) return 'yesterday';
+  if (date >= sevenDaysAgo) return 'last_week';
+  return 'older';
+};
+
+export const getUpdatedTimelineLabel = (updatedAt: string | null | undefined): string => {
+  const timeline = getUpdatedTimeline(updatedAt);
+  switch (timeline) {
+    case 'today': return 'Today';
+    case 'yesterday': return 'Yesterday';
+    case 'last_week': return 'Last 7 days';
+    case 'older': return updatedAt ? formatDate(updatedAt) : '—';
+  }
+};
+
+/** Badge style for updated timeline (for use in ProductList) */
+export const getUpdatedTimelineBadgeClass = (timeline: UpdatedTimeline): string => {
+  switch (timeline) {
+    case 'today': return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+    case 'yesterday': return 'bg-blue-100 text-blue-800 border-blue-200';
+    case 'last_week': return 'bg-slate-100 text-slate-700 border-slate-200';
+    default: return 'bg-gray-100 text-gray-600 border-gray-200';
+  }
+};
+
 export const formatWeight = (weight: number) => {
   return `${weight.toFixed(3)}kg`;
 };
