@@ -65,8 +65,8 @@ export function Table<T extends { id: string }>({
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-gray-200">
+    <div className="w-full min-w-0 overflow-hidden">
+      <table className="table-fixed w-full divide-y divide-gray-200">
         <thead className="bg-gray-50">
           <tr>
             {onSelectRow && (
@@ -82,9 +82,8 @@ export function Table<T extends { id: string }>({
             {columns.map((column) => (
               <th
                 key={column.key}
-                className={`px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${
-                  column.width || ''
-                }`}
+                className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                style={column.width ? { width: column.width } : undefined}
               >
                 {column.sortable ? (
                   <button
@@ -108,7 +107,7 @@ export function Table<T extends { id: string }>({
                 )}
               </th>
             ))}
-            {rowActions && <th className="px-6 py-3 w-48" />}
+            {rowActions && <th className="px-2 py-3" style={{ width: '6%' }} />}
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
@@ -136,7 +135,8 @@ export function Table<T extends { id: string }>({
               {columns.map((column) => (
                 <td
                   key={column.key}
-                  className="px-6 py-4 whitespace-nowrap text-sm text-gray-900"
+                  className="px-3 py-3 text-sm text-gray-900 align-top break-words"
+                  style={column.width ? { width: column.width } : undefined}
                 >
                   {column.render
                     ? column.render(item)
@@ -144,7 +144,7 @@ export function Table<T extends { id: string }>({
                 </td>
               ))}
               {rowActions && (
-                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                <td className="px-2 py-3 whitespace-nowrap text-right text-sm font-medium">
                   {rowActions(item)}
                 </td>
               )}

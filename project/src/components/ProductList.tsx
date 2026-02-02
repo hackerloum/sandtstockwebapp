@@ -503,8 +503,9 @@ export const ProductList: React.FC<ProductListProps> = ({
   const columns = [
     {
       key: 'codes',
-      header: 'Product Codes',
+      header: 'Codes',
       sortable: true,
+      width: '14%',
       render: (product: ExtendedProduct) => {
         const prefix = product.item_number?.substring(0, 2);
         const suffix = product.item_number?.substring(2);
@@ -520,14 +521,11 @@ export const ProductList: React.FC<ProductListProps> = ({
         };
         
         return (
-          <div>
-            <div className="font-medium text-gray-900">{product.code}</div>
-            <div className="text-sm text-gray-500">
+          <div className="min-w-0">
+            <div className="font-medium text-gray-900 truncate" title={product.code}>{product.code}</div>
+            <div className="text-xs text-gray-500 truncate" title={product.item_number}>
               {prefix && <span className="font-semibold text-blue-600">{prefix}</span>}
               {suffix}
-            </div>
-            <div className="text-xs text-gray-400">
-              {prefix ? getPrefixMeaning(prefix) : 'Batch tracking'}
             </div>
           </div>
         );
@@ -535,29 +533,16 @@ export const ProductList: React.FC<ProductListProps> = ({
     },
     {
       key: 'details',
-      header: 'Product Details',
+      header: 'Product',
       sortable: true,
+      width: '25%',
       render: (product: ExtendedProduct) => (
-        <div>
-          <div className="font-medium text-gray-900">{product.commercial_name}</div>
-          <div className="text-sm text-gray-500">
-            Brand: {product.brand?.name || product.brand_id || 'N/A'}
-          </div>
-          <div className="text-xs text-gray-400">
-            {product.size}ml • {product.category || 'N/A'}
-          </div>
+        <div className="min-w-0">
+          <div className="font-medium text-gray-900 truncate" title={product.commercial_name}>{product.commercial_name}</div>
+          <div className="text-xs text-gray-500 truncate">{product.brand?.name || product.brand_id || '—'}</div>
+          <div className="text-xs text-gray-400">{product.size}ml • {product.category || '—'}</div>
           {product.product_type && (
-            <div className="text-xs text-blue-600 font-medium">{product.product_type}</div>
-          )}
-          {product.product_type === 'Fragrance Bottles' && product.gross_weight && product.tare_weight && product.net_weight && (
-            <div className="text-xs text-green-600 mt-1">
-              GROSS: {formatWeight(product.gross_weight)} • TARE: {formatWeight(product.tare_weight)} • NET: {formatWeight(product.net_weight)}
-            </div>
-          )}
-          {product.fragrance_notes && (
-            <div className="text-xs text-gray-500 mt-1">
-              Notes: {product.fragrance_notes}
-            </div>
+            <div className="text-xs text-blue-600 font-medium truncate">{product.product_type}</div>
           )}
         </div>
       )
@@ -566,6 +551,7 @@ export const ProductList: React.FC<ProductListProps> = ({
       key: 'stock',
       header: 'Stock',
       sortable: true,
+      width: '10%',
       render: (product: ExtendedProduct) => {
         const currentStock = product.current_stock || 0;
         const minStock = product.min_stock || 5;
@@ -587,20 +573,20 @@ export const ProductList: React.FC<ProductListProps> = ({
         }
         
         return (
-          <div className={`p-2 rounded-lg border ${borderColor} ${bgColor}`}>
-            <div className="flex items-center justify-between">
-              <span className={`font-bold text-lg ${stockColor}`}>{currentStock}</span>
+          <div className={`p-1.5 rounded border ${borderColor} ${bgColor} min-w-0`}>
+            <div className="flex items-baseline justify-between gap-1">
+              <span className={`font-bold ${stockColor}`}>{currentStock}</span>
               <span className="text-xs text-gray-500">/ {maxStock}</span>
             </div>
-            <div className="text-xs text-gray-600">Min: {minStock}</div>
-            <div className="text-xs text-gray-500">Reorder: {product.reorder_point || 10}</div>
+            <div className="text-xs text-gray-600">Min {minStock}</div>
           </div>
         );
       }
     },
     {
       key: 'status',
-      header: 'Stock Status',
+      header: 'Status',
+      width: '12%',
       render: (product: ExtendedProduct) => {
         const status = getStockStatus(product as any);
         const statusColor = getStockStatusColor(status);
@@ -627,18 +613,13 @@ export const ProductList: React.FC<ProductListProps> = ({
         }
         
         return (
-          <div className="space-y-2">
-            <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full border ${statusColor}`}>
+          <div className="space-y-1 min-w-0">
+            <span className={`inline-flex px-1.5 py-0.5 text-xs font-medium rounded border ${statusColor}`}>
               {statusText}
             </span>
-            <div className={`inline-flex px-2 py-1 text-xs font-bold rounded ${stockLevelColor}`}>
+            <div className={`inline-flex px-1.5 py-0.5 text-xs font-bold rounded ${stockLevelColor}`}>
               {stockLevelText}
             </div>
-            {product.supplier?.name && (
-              <div className="text-xs text-gray-400 mt-1">
-                Supplier: {product.supplier.name}
-              </div>
-            )}
           </div>
         );
       }
@@ -647,25 +628,21 @@ export const ProductList: React.FC<ProductListProps> = ({
       key: 'price',
       header: 'Price',
       sortable: true,
+      width: '9%',
       render: (product: ExtendedProduct) => (
-        <div>
-          <div className="font-medium">{formatCurrency(product.price)}</div>
-          {product.concentration && (
-            <div className="text-xs text-gray-400">{product.concentration}</div>
-          )}
+        <div className="min-w-0">
+          <div className="font-medium text-sm">{formatCurrency(product.price)}</div>
         </div>
       )
     },
     {
       key: 'value',
-      header: 'Total Value',
+      header: 'Value',
       sortable: true,
+      width: '11%',
       render: (product: ExtendedProduct) => (
-        <div>
-          <div className="font-medium">{formatCurrency(product.current_stock * product.price)}</div>
-          <div className="text-xs text-gray-400">
-            {product.supplier?.name || 'Argeville'}
-          </div>
+        <div className="min-w-0">
+          <div className="font-medium text-sm">{formatCurrency(product.current_stock * product.price)}</div>
         </div>
       )
     },
@@ -673,18 +650,19 @@ export const ProductList: React.FC<ProductListProps> = ({
       key: 'updated_at',
       header: 'Updated',
       sortable: true,
+      width: '13%',
       render: (product: ExtendedProduct) => {
         const timeline = getUpdatedTimeline(product.updated_at);
         const label = getUpdatedTimelineLabel(product.updated_at);
         const badgeClass = getUpdatedTimelineBadgeClass(timeline);
         return (
-          <div className="space-y-1">
-            <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded border ${badgeClass}`}>
+          <div className="space-y-0.5 min-w-0">
+            <span className={`inline-flex px-1.5 py-0.5 text-xs font-medium rounded border ${badgeClass}`}>
               {label}
             </span>
             {product.updated_at && (
-              <div className="text-xs text-gray-500" title={new Date(product.updated_at).toLocaleString()}>
-                {new Date(product.updated_at).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}
+              <div className="text-xs text-gray-500 truncate" title={new Date(product.updated_at).toLocaleString()}>
+                {new Date(product.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
               </div>
             )}
           </div>
