@@ -83,8 +83,8 @@ export const ProductList: React.FC<ProductListProps> = ({
     productTypeFilter: 'all',
     brandFilter: 'all',
     updatedFilter: 'all',
-    priceRange: { min: 0, max: 10000 },
-    stockRange: { min: 0, max: 1000 },
+    priceRange: { min: -1e6, max: 10000 },
+    stockRange: { min: -1e6, max: 1000 },
     isTester: null
   });
 
@@ -248,15 +248,25 @@ export const ProductList: React.FC<ProductListProps> = ({
   console.log('ProductList: Extended products:', extendedProducts);
   console.log('ProductList: Extended products count:', extendedProducts?.length || 0);
 
-  // Calculate dynamic ranges based on actual data
+  // Calculate dynamic ranges based on actual data (include negatives so all products show)
+  const minStock = useMemo(() => {
+    if (extendedProducts.length === 0) return 0;
+    return Math.min(...extendedProducts.map(p => p.current_stock ?? 0));
+  }, [extendedProducts]);
+
   const maxStock = useMemo(() => {
     if (extendedProducts.length === 0) return 1000;
-    return Math.max(...extendedProducts.map(p => p.current_stock || 0), 1000);
+    return Math.max(...extendedProducts.map(p => p.current_stock ?? 0), 1000);
+  }, [extendedProducts]);
+
+  const minPrice = useMemo(() => {
+    if (extendedProducts.length === 0) return 0;
+    return Math.min(...extendedProducts.map(p => p.price ?? 0));
   }, [extendedProducts]);
 
   const maxPrice = useMemo(() => {
     if (extendedProducts.length === 0) return 10000;
-    return Math.max(...extendedProducts.map(p => p.price || 0), 10000);
+    return Math.max(...extendedProducts.map(p => p.price ?? 0), 10000);
   }, [extendedProducts]);
 
   // Extract unique values for filters
@@ -270,17 +280,19 @@ export const ProductList: React.FC<ProductListProps> = ({
   console.log('ProductList: Max stock found:', maxStock);
   console.log('ProductList: Max price found:', maxPrice);
 
-  // Update filters with dynamic ranges when max values are calculated
+  // Update filters with dynamic ranges so all products (including negative stock/price) are included
   useEffect(() => {
-    if (maxStock > 1000 || maxPrice > 10000) {
-      console.log('ProductList: Updating filters with dynamic ranges - maxStock:', maxStock, 'maxPrice:', maxPrice);
+    if (extendedProducts.length === 0) return;
+    const stockWider = minStock < 0 || maxStock > 1000;
+    const priceWider = minPrice < 0 || maxPrice > 10000;
+    if (stockWider || priceWider) {
       setFilters(prev => ({
         ...prev,
-        priceRange: { min: 0, max: maxPrice },
-        stockRange: { min: 0, max: maxStock }
+        priceRange: { min: minPrice, max: maxPrice },
+        stockRange: { min: minStock, max: maxStock }
       }));
     }
-  }, [maxStock, maxPrice]);
+  }, [extendedProducts.length, minStock, maxStock, minPrice, maxPrice]);
 
   // Enhanced search functionality
   const filteredProducts = useMemo(() => {
@@ -466,14 +478,14 @@ export const ProductList: React.FC<ProductListProps> = ({
       productTypeFilter: 'all',
       brandFilter: 'all',
       updatedFilter: 'all',
-      priceRange: { min: 0, max: maxPrice },
-      stockRange: { min: 0, max: maxStock },
+      priceRange: { min: minPrice, max: maxPrice },
+      stockRange: { min: minStock, max: maxStock },
       isTester: null
     });
     if (suggestion && !searchHistory.includes(suggestion)) {
       setSearchHistory(prev => [suggestion, ...prev.slice(0, 4)]);
     }
-  }, [searchHistory, maxPrice, maxStock]);
+  }, [searchHistory, minPrice, maxPrice, minStock, maxStock]);
 
   // Handle sort
   const handleSort = useCallback((field: SortField) => {
@@ -494,11 +506,11 @@ export const ProductList: React.FC<ProductListProps> = ({
       productTypeFilter: 'all',
       brandFilter: 'all',
       updatedFilter: 'all',
-      priceRange: { min: 0, max: maxPrice },
-      stockRange: { min: 0, max: maxStock },
+      priceRange: { min: minPrice, max: maxPrice },
+      stockRange: { min: minStock, max: maxStock },
       isTester: null
     });
-  }, [maxPrice, maxStock]);
+  }, [minPrice, maxPrice, minStock, maxStock]);
 
   const columns = [
     {
@@ -709,9 +721,9 @@ export const ProductList: React.FC<ProductListProps> = ({
     filters.productTypeFilter !== 'all' || 
     filters.brandFilter !== 'all' || 
     filters.updatedFilter !== 'all' ||
-    filters.priceRange.min > 0 || 
+    filters.priceRange.min > minPrice || 
     filters.priceRange.max < maxPrice || 
-    filters.stockRange.min > 0 || 
+    filters.stockRange.min > minStock || 
     filters.stockRange.max < maxStock || 
     filters.isTester !== null;
 
