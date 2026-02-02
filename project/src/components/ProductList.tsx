@@ -1177,7 +1177,7 @@ export const ProductList: React.FC<ProductListProps> = ({
             data={sortedProducts}
             columns={columns}
             rowActions={(product) => (
-              <div className="flex items-center justify-end space-x-2">
+              <div className="flex items-center justify-end space-x-2" onClick={(e) => e.stopPropagation()}>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1198,6 +1198,7 @@ export const ProductList: React.FC<ProductListProps> = ({
                   <Button
                     variant="ghost"
                     size="sm"
+                    type="button"
                     icon={<Trash2 className="w-4 h-4" />}
                     onClick={() => onDeleteProduct(product.id)}
                     title="Delete Product"

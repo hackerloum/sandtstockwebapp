@@ -856,41 +856,45 @@ export const updateProduct = async (id: string, updates: Partial<Database['publi
   }
 };
 
+/** Delete related rows then product (satisfies FK constraints). Uses given client. */
+async function deleteProductWithClient(client: ReturnType<typeof createClient>, id: string): Promise<{ error: unknown } | null> {
+  // Order: dependents first, then product (stock_movements → product_batches → order_items, purchase_order_items → products)
+  const tables = [
+    { table: 'stock_movements' as const, column: 'product_id' },
+    { table: 'product_batches' as const, column: 'product_id' },
+    { table: 'order_items' as const, column: 'product_id' },
+    { table: 'purchase_order_items' as const, column: 'product_id' }
+  ] as const;
+  for (const { table, column } of tables) {
+    const { error } = await client.from(table).delete().eq(column, id);
+    if (error) return error;
+  }
+  const { error } = await client.from('products').delete().eq('id', id);
+  if (error) return error;
+  return null;
+}
+
 export const deleteProduct = async (id: string) => {
   console.log('deleteProduct called with id:', id);
-  
+
   try {
-    // Try with anon key first
-    const { error } = await supabase
-      .from('products')
-      .delete()
-      .eq('id', id);
-    
-    if (error) {
-      console.error('Anon key delete failed:', error);
-      
-      // Fallback: try with service role client (bypass RLS)
-      const serviceRoleClient = createClient(
-        supabaseUrl,
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxqa3Z3YWR1cXZhY21ydnljc2hqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MzkxMTcxOCwiZXhwIjoyMDY5NDg3NzE4fQ.yTH08Ylnmyh7Dcgy8QaQgABZrTG1LPylK1ET_MGLvlw'
-      );
-      
-      const { error: serviceError } = await serviceRoleClient
-        .from('products')
-        .delete()
-        .eq('id', id);
-      
-      if (serviceError) {
-        console.error('Service role delete also failed:', serviceError);
-        throw serviceError;
-      }
-      
-      console.log('Product deleted successfully (service role)');
-      return true;
+    const error = await deleteProductWithClient(supabase, id);
+    if (!error) {
+      console.log('Product deleted successfully (anon key)');
+      return;
     }
-    
-    console.log('Product deleted successfully (anon key)');
-    return true;
+    console.error('Anon key delete failed:', error);
+
+    const serviceRoleClient = createClient(
+      supabaseUrl,
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxqa3Z3YWR1cXZhY21ydnljc2hqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MzkxMTcxOCwiZXhwIjoyMDY5NDg3NzE4fQ.yTH08Ylnmyh7Dcgy8QaQgABZrTG1LPylK1ET_MGLvlw'
+    );
+    const serviceError = await deleteProductWithClient(serviceRoleClient, id);
+    if (serviceError) {
+      console.error('Service role delete also failed:', serviceError);
+      throw serviceError;
+    }
+    console.log('Product deleted successfully (service role)');
   } catch (err) {
     console.error('Error in deleteProduct:', err);
     throw err;
