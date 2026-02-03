@@ -56,6 +56,7 @@ function AppContent() {
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
   const [scrollToProductId, setScrollToProductId] = useState<string | null>(null);
   const productsScrollYRef = useRef(0);
+  const mainScrollRef = useRef<HTMLMainElement>(null);
 
   // Fetch data from Supabase
   useEffect(() => {
@@ -139,7 +140,7 @@ function AppContent() {
   };
 
   const handleEditProduct = (product: Product) => {
-    productsScrollYRef.current = window.scrollY;
+    productsScrollYRef.current = mainScrollRef.current?.scrollTop ?? window.scrollY;
     setEditingProduct(product);
     setActiveTab('edit-product');
   };
@@ -445,7 +446,11 @@ function AppContent() {
         </div>
       )}
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main
+        ref={mainScrollRef}
+        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 overflow-y-auto"
+        style={{ height: 'calc(100vh - 4rem)' }}
+      >
         {activeTab === 'dashboard' && hasPermission('view_dashboard') && (
           <Dashboard 
             onCreatePurchaseOrder={(productId) => {
@@ -475,6 +480,7 @@ function AppContent() {
             scrollToProductId={scrollToProductId}
             onScrollToProductDone={() => setScrollToProductId(null)}
             productsScrollYRef={productsScrollYRef}
+            mainScrollRef={mainScrollRef}
           />
         )}
 
