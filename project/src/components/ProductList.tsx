@@ -18,6 +18,8 @@ interface ProductListProps {
   onDeleteProduct: (id: string) => void;
   onViewProduct: (product: Product) => void;
   onUpdateProduct?: (product: Product) => void;
+  scrollToProductId?: string | null;
+  onScrollToProductDone?: () => void;
 }
 
 type SortField = 'commercial_name' | 'code' | 'current_stock' | 'price' | 'created_at' | 'updated_at' | 'product_type';
@@ -47,7 +49,9 @@ export const ProductList: React.FC<ProductListProps> = ({
   onEditProduct,
   onDeleteProduct,
   onViewProduct,
-  onUpdateProduct
+  onUpdateProduct,
+  scrollToProductId,
+  onScrollToProductDone
 }) => {
   const { hasPermission, user } = useAuth();
   
@@ -296,6 +300,20 @@ export const ProductList: React.FC<ProductListProps> = ({
       }));
     }
   }, [extendedProducts.length, minStock, maxStock, minPrice, maxPrice]);
+
+  // Scroll to edited product when returning from edit so list position is preserved
+  useEffect(() => {
+    if (!scrollToProductId || !onScrollToProductDone) return;
+    const el = document.querySelector(`[data-row-id="${scrollToProductId}"]`);
+    if (el) {
+      requestAnimationFrame(() => {
+        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        onScrollToProductDone();
+      });
+    } else {
+      onScrollToProductDone();
+    }
+  }, [scrollToProductId, onScrollToProductDone]);
 
   // Enhanced search functionality
   const filteredProducts = useMemo(() => {

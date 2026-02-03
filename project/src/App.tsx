@@ -54,6 +54,7 @@ function AppContent() {
   const [isProductDetailOpen, setIsProductDetailOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
+  const [scrollToProductId, setScrollToProductId] = useState<string | null>(null);
 
   // Fetch data from Supabase
   useEffect(() => {
@@ -469,6 +470,8 @@ function AppContent() {
             onDeleteProduct={handleDeleteProduct}
             onViewProduct={handleViewProduct}
             onUpdateProduct={handleUpdateProduct}
+            scrollToProductId={scrollToProductId}
+            onScrollToProductDone={() => setScrollToProductId(null)}
           />
         )}
 
