@@ -37,6 +37,17 @@ import {
 
 type ActiveTab = 'dashboard' | 'products' | 'add-product' | 'edit-product' | 'movements' | 'orders' | 'purchase-orders' | 'reports' | 'product-reports' | 'activity' | 'debug';
 
+type ProductListScrollState = {
+  scrollOffset: number;
+  anchorId?: string;
+  anchorOffset?: number;
+};
+
+type ProductListAnchor = {
+  id: string;
+  offset: number;
+};
+
 function AppContent() {
   const { user, logout, hasPermission } = useAuth();
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
@@ -54,9 +65,9 @@ function AppContent() {
   const [isProductDetailOpen, setIsProductDetailOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
-  const [scrollToProductId, setScrollToProductId] = useState<string | null>(null);
-  const productsScrollYRef = useRef(0);
-  const mainScrollRef = useRef<HTMLMainElement>(null);
+  const [productListScrollState, setProductListScrollState] = useState<ProductListScrollState | null>(null);
+  const [shouldRestoreProductListScroll, setShouldRestoreProductListScroll] = useState(false);
+  const restoreAttemptsRef = useRef(0);
 
   // Fetch data from Supabase
   useEffect(() => {
@@ -139,8 +150,54 @@ function AppContent() {
     }
   };
 
+  const getProductListContainer = () => {
+    if (typeof window === 'undefined') return null;
+    return document.querySelector('[data-product-list="container"]');
+  };
+
+  const getProductListTop = () => {
+    const listElement = getProductListContainer();
+    if (!listElement || typeof window === 'undefined') return 0;
+    return listElement.getBoundingClientRect().top + window.scrollY;
+  };
+
+  const getProductListRowOffset = (productId: string) => {
+    const listElement = getProductListContainer();
+    if (!listElement) return null;
+    const rowElement = listElement.querySelector(`[data-row-id="${productId}"]`);
+    if (!rowElement) return null;
+    return rowElement.getBoundingClientRect().top;
+  };
+
+  const getProductListAnchor = (): ProductListAnchor | null => {
+    if (typeof window === 'undefined') return null;
+    const listElement = getProductListContainer();
+    if (!listElement) return null;
+    const rows = Array.from(listElement.querySelectorAll('[data-row-id]'));
+    let anchor: ProductListAnchor | null = null;
+    rows.forEach((row) => {
+      const rect = row.getBoundingClientRect();
+      const rowId = row.getAttribute('data-row-id');
+      if (!rowId || rect.bottom <= 0 || rect.top >= window.innerHeight) return;
+      if (!anchor || rect.top < anchor.offset) {
+        anchor = { id: rowId, offset: rect.top };
+      }
+    });
+    return anchor;
+  };
+
   const handleEditProduct = (product: Product) => {
-    productsScrollYRef.current = mainScrollRef.current?.scrollTop ?? window.scrollY;
+    if (activeTab === 'products' && typeof window !== 'undefined') {
+      const listTop = getProductListTop();
+      const rowOffset = getProductListRowOffset(product.id);
+      const anchor = getProductListAnchor();
+      setProductListScrollState({
+        scrollOffset: Math.max(0, window.scrollY - listTop),
+        anchorId: anchor?.id ?? product.id,
+        anchorOffset: anchor?.offset ?? rowOffset ?? undefined
+      });
+      setShouldRestoreProductListScroll(true);
+    }
     setEditingProduct(product);
     setActiveTab('edit-product');
   };
@@ -269,6 +326,60 @@ function AppContent() {
     document.addEventListener('pointerdown', handlePointerDown);
     return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'products' || !shouldRestoreProductListScroll || !productListScrollState) return;
+    if (typeof window === 'undefined') return;
+
+    const restoreScroll = () => {
+      const maxAttempts = 6;
+      const tolerance = 2;
+      const listElement = getProductListContainer();
+      let targetScrollY = window.scrollY;
+      let usedAnchor = false;
+
+      if (
+        listElement &&
+        productListScrollState.anchorId &&
+        typeof productListScrollState.anchorOffset === 'number'
+      ) {
+        const rowElement = listElement.querySelector(
+          `[data-row-id="${productListScrollState.anchorId}"]`
+        );
+        if (rowElement) {
+          const rowDocTop = rowElement.getBoundingClientRect().top + window.scrollY;
+          targetScrollY = Math.max(0, rowDocTop - productListScrollState.anchorOffset);
+          usedAnchor = true;
+        }
+      }
+
+      if (!usedAnchor) {
+        const listTop = getProductListTop();
+        targetScrollY = Math.max(0, listTop + productListScrollState.scrollOffset);
+      }
+
+      window.scrollTo(0, targetScrollY);
+
+      const currentAnchorDelta = usedAnchor
+        ? (listElement?.querySelector(`[data-row-id="${productListScrollState.anchorId}"]`) as HTMLElement | null)?.getBoundingClientRect().top - productListScrollState.anchorOffset
+        : 0;
+
+      const isSettled =
+        Math.abs(window.scrollY - targetScrollY) <= tolerance &&
+        (!usedAnchor || Math.abs(currentAnchorDelta || 0) <= tolerance);
+
+      if (!isSettled && restoreAttemptsRef.current < maxAttempts) {
+        restoreAttemptsRef.current += 1;
+        requestAnimationFrame(restoreScroll);
+        return;
+      }
+
+      restoreAttemptsRef.current = 0;
+      setShouldRestoreProductListScroll(false);
+    };
+
+    requestAnimationFrame(restoreScroll);
+  }, [activeTab, productListScrollState, shouldRestoreProductListScroll]);
 
   const visibleMainTabs = mainTabs.filter(tab => hasPermission(tab.permission));
   const visibleSecondaryTabs = secondaryTabs.filter(tab => hasPermission(tab.permission));
@@ -446,11 +557,7 @@ function AppContent() {
         </div>
       )}
 
-      <main
-        ref={mainScrollRef}
-        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 overflow-y-auto"
-        style={{ height: 'calc(100vh - 4rem)' }}
-      >
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {activeTab === 'dashboard' && hasPermission('view_dashboard') && (
           <Dashboard 
             onCreatePurchaseOrder={(productId) => {
@@ -477,10 +584,6 @@ function AppContent() {
             onDeleteProduct={handleDeleteProduct}
             onViewProduct={handleViewProduct}
             onUpdateProduct={handleUpdateProduct}
-            scrollToProductId={scrollToProductId}
-            onScrollToProductDone={() => setScrollToProductId(null)}
-            productsScrollYRef={productsScrollYRef}
-            mainScrollRef={mainScrollRef}
           />
         )}
 

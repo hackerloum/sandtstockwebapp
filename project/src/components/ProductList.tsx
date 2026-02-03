@@ -18,10 +18,6 @@ interface ProductListProps {
   onDeleteProduct: (id: string) => void;
   onViewProduct: (product: Product) => void;
   onUpdateProduct?: (product: Product) => void;
-  scrollToProductId?: string | null;
-  onScrollToProductDone?: () => void;
-  productsScrollYRef?: React.MutableRefObject<number>;
-  mainScrollRef?: React.RefObject<HTMLMainElement | null>;
 }
 
 type SortField = 'commercial_name' | 'code' | 'current_stock' | 'price' | 'created_at' | 'updated_at' | 'product_type';
@@ -51,11 +47,7 @@ export const ProductList: React.FC<ProductListProps> = ({
   onEditProduct,
   onDeleteProduct,
   onViewProduct,
-  onUpdateProduct,
-  scrollToProductId,
-  onScrollToProductDone,
-  productsScrollYRef,
-  mainScrollRef
+  onUpdateProduct
 }) => {
   const { hasPermission, user } = useAuth();
   
@@ -304,29 +296,6 @@ export const ProductList: React.FC<ProductListProps> = ({
       }));
     }
   }, [extendedProducts.length, minStock, maxStock, minPrice, maxPrice]);
-
-  // Restore scroll position when returning from edit (main content is the scroll container)
-  useEffect(() => {
-    if (!scrollToProductId || !onScrollToProductDone) return;
-    const savedY = productsScrollYRef?.current ?? 0;
-    const restore = () => {
-      if (mainScrollRef?.current) {
-        mainScrollRef.current.scrollTop = savedY;
-      } else {
-        window.scrollTo({ top: savedY, left: 0, behavior: 'auto' });
-      }
-    };
-    restore();
-    const t1 = setTimeout(restore, 50);
-    const t2 = setTimeout(() => {
-      restore();
-      onScrollToProductDone();
-    }, 150);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, [scrollToProductId, onScrollToProductDone, productsScrollYRef, mainScrollRef]);
 
   // Enhanced search functionality
   const filteredProducts = useMemo(() => {
@@ -794,7 +763,7 @@ export const ProductList: React.FC<ProductListProps> = ({
     filters.isTester !== null;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-product-list="container">
       <PageHeader
         title="Products"
         subtitle={`${sortedProducts.length} of ${products.length} products`}
