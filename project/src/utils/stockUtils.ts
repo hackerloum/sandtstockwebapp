@@ -53,6 +53,11 @@ export const getUpdatedTimelineLabel = (updatedAt: string | null | undefined): s
   }
 };
 
+/** True if product was not updated within the last 7 days (uses updated_at only). */
+export const isNotUpdatedWithin7Days = (updatedAt: string | null | undefined): boolean => {
+  return getUpdatedTimeline(updatedAt) === 'older';
+};
+
 /** Badge style for updated timeline (for use in ProductList) */
 export const getUpdatedTimelineBadgeClass = (timeline: UpdatedTimeline): string => {
   switch (timeline) {

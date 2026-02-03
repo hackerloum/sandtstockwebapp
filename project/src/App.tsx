@@ -468,6 +468,7 @@ function AppContent() {
             onEditProduct={handleEditProduct}
             onDeleteProduct={handleDeleteProduct}
             onViewProduct={handleViewProduct}
+            onUpdateProduct={handleUpdateProduct}
           />
         )}
 

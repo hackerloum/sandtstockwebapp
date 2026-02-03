@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { Search, Plus, Edit2, Trash2, Eye, Package, Filter, X, SortAsc, SortDesc, Clock, Download } from 'lucide-react';
+import { Search, Plus, Edit2, Trash2, Eye, Package, Filter, X, SortAsc, SortDesc, Clock, Download, RotateCcw } from 'lucide-react';
 import { Product } from '../types';
-import { getStockStatus, getStockStatusColor, getStatusText, formatCurrency, formatWeight, getUpdatedTimeline, getUpdatedTimelineLabel, getUpdatedTimelineBadgeClass } from '../utils/stockUtils';
+import { getStockStatus, getStockStatusColor, getStatusText, formatCurrency, formatWeight, getUpdatedTimeline, getUpdatedTimelineLabel, getUpdatedTimelineBadgeClass, isNotUpdatedWithin7Days } from '../utils/stockUtils';
 import { exportProductsToExcel, exportFilteredProductsToExcel } from '../utils/excelUtils';
 import { PageHeader, PageContainer, PageSection, EmptyState } from './shared/PageLayout';
 import { Button } from './shared/Button';
@@ -17,6 +17,7 @@ interface ProductListProps {
   onEditProduct: (product: Product) => void;
   onDeleteProduct: (id: string) => void;
   onViewProduct: (product: Product) => void;
+  onUpdateProduct?: (product: Product) => void;
 }
 
 type SortField = 'commercial_name' | 'code' | 'current_stock' | 'price' | 'created_at' | 'updated_at' | 'product_type';
@@ -45,7 +46,8 @@ export const ProductList: React.FC<ProductListProps> = ({
   onAddProduct,
   onEditProduct,
   onDeleteProduct,
-  onViewProduct
+  onViewProduct,
+  onUpdateProduct
 }) => {
   const { hasPermission, user } = useAuth();
   
@@ -93,6 +95,7 @@ export const ProductList: React.FC<ProductListProps> = ({
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
   const [showBulkPriceUpdate, setShowBulkPriceUpdate] = useState(false);
+  const [zeroingStaleStock, setZeroingStaleStock] = useState(false);
   const [bulkPriceUpdate, setBulkPriceUpdate] = useState({
     percentage: 0,
     fixedAmount: 0,
@@ -512,6 +515,38 @@ export const ProductList: React.FC<ProductListProps> = ({
     });
   }, [minPrice, maxPrice, minStock, maxStock]);
 
+  /** Set current_stock to 0 for all products not updated within the last 7 days (uses updated_at). */
+  const handleZeroStockNotUpdated7Days = useCallback(async () => {
+    const stale = extendedProducts.filter((p) => isNotUpdatedWithin7Days(p.updated_at));
+    if (stale.length === 0) {
+      alert('No products found that were not updated in the last 7 days. All products have been updated recently.');
+      return;
+    }
+    const message = `Set current stock to 0 for ${stale.length} product(s) that have not been updated in the last 7 days?\n\nThis uses each product's "Updated" date (updated_at), not the created date.`;
+    if (!confirm(message)) return;
+    if (!onUpdateProduct) {
+      alert('Cannot update products: missing update handler.');
+      return;
+    }
+    setZeroingStaleStock(true);
+    try {
+      let updated = 0;
+      for (const product of stale) {
+        const result = await updateProduct(product.id, { current_stock: 0 });
+        if (result) {
+          onUpdateProduct({ ...product, ...result, current_stock: 0 } as Product);
+          updated++;
+        }
+      }
+      alert(`Done. Set stock to 0 for ${updated} product(s) that were not updated in the last 7 days.`);
+    } catch (err) {
+      console.error('Error zeroing stale stock:', err);
+      alert(err instanceof Error ? err.message : 'Failed to update some products. Check console.');
+    } finally {
+      setZeroingStaleStock(false);
+    }
+  }, [extendedProducts, onUpdateProduct]);
+
   const columns = [
     {
       key: 'codes',
@@ -768,6 +803,20 @@ export const ProductList: React.FC<ProductListProps> = ({
                 title="Update prices for all products"
               >
                 Bulk Price Update
+              </Button>
+            )}
+
+            {/* Zero stock for products not updated in 7+ days */}
+            {hasPermission('edit_product') && (
+              <Button
+                variant="outline"
+                size="sm"
+                icon={<RotateCcw className="w-4 h-4" />}
+                onClick={handleZeroStockNotUpdated7Days}
+                disabled={zeroingStaleStock}
+                title="Set current stock to 0 for products not updated in the last 7 days (uses Updated date)"
+              >
+                {zeroingStaleStock ? 'Updating…' : 'Zero stock (not updated 7+ days)'}
               </Button>
             )}
             
