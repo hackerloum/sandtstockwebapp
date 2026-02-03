@@ -20,6 +20,7 @@ interface ProductListProps {
   onUpdateProduct?: (product: Product) => void;
   scrollToProductId?: string | null;
   onScrollToProductDone?: () => void;
+  productsScrollYRef?: React.MutableRefObject<number>;
 }
 
 type SortField = 'commercial_name' | 'code' | 'current_stock' | 'price' | 'created_at' | 'updated_at' | 'product_type';
@@ -51,7 +52,8 @@ export const ProductList: React.FC<ProductListProps> = ({
   onViewProduct,
   onUpdateProduct,
   scrollToProductId,
-  onScrollToProductDone
+  onScrollToProductDone,
+  productsScrollYRef
 }) => {
   const { hasPermission, user } = useAuth();
   
@@ -301,19 +303,18 @@ export const ProductList: React.FC<ProductListProps> = ({
     }
   }, [extendedProducts.length, minStock, maxStock, minPrice, maxPrice]);
 
-  // Scroll to edited product when returning from edit so list position is preserved
+  // Restore scroll position when returning from edit so list location is preserved
   useEffect(() => {
     if (!scrollToProductId || !onScrollToProductDone) return;
-    const el = document.querySelector(`[data-row-id="${scrollToProductId}"]`);
-    if (el) {
-      requestAnimationFrame(() => {
-        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        onScrollToProductDone();
-      });
-    } else {
+    const savedY = productsScrollYRef?.current ?? 0;
+    const restore = () => {
+      window.scrollTo({ top: savedY, left: 0, behavior: 'auto' });
       onScrollToProductDone();
-    }
-  }, [scrollToProductId, onScrollToProductDone]);
+    };
+    // Run after paint so we win over any scroll-to-top when tab switches
+    const t = setTimeout(restore, 50);
+    return () => clearTimeout(t);
+  }, [scrollToProductId, onScrollToProductDone, productsScrollYRef]);
 
   // Enhanced search functionality
   const filteredProducts = useMemo(() => {

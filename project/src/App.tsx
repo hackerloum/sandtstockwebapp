@@ -55,6 +55,7 @@ function AppContent() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
   const [scrollToProductId, setScrollToProductId] = useState<string | null>(null);
+  const productsScrollYRef = useRef(0);
 
   // Fetch data from Supabase
   useEffect(() => {
@@ -138,6 +139,7 @@ function AppContent() {
   };
 
   const handleEditProduct = (product: Product) => {
+    productsScrollYRef.current = window.scrollY;
     setEditingProduct(product);
     setActiveTab('edit-product');
   };
@@ -472,6 +474,7 @@ function AppContent() {
             onUpdateProduct={handleUpdateProduct}
             scrollToProductId={scrollToProductId}
             onScrollToProductDone={() => setScrollToProductId(null)}
+            productsScrollYRef={productsScrollYRef}
           />
         )}
 
