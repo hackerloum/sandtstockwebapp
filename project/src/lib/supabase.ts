@@ -856,8 +856,11 @@ export const updateProduct = async (id: string, updates: Partial<Database['publi
   }
 };
 
-/** Delete related rows then product (satisfies FK constraints). Uses given client. */
-async function deleteProductWithClient(client: ReturnType<typeof createClient>, id: string): Promise<{ error: unknown } | null> {
+/** Delete related rows then product (satisfies FK constraints). Returns error or true if product was deleted, false if 0 rows deleted. */
+async function deleteProductWithClient(
+  client: ReturnType<typeof createClient>,
+  id: string
+): Promise<{ error: unknown } | true | false> {
   // Order: dependents first, then product (stock_movements → product_batches → order_items, purchase_order_items → products)
   const tables = [
     { table: 'stock_movements' as const, column: 'product_id' },
@@ -869,36 +872,41 @@ async function deleteProductWithClient(client: ReturnType<typeof createClient>, 
     const { error } = await client.from(table).delete().eq(column, id);
     if (error) return error;
   }
-  const { error } = await client.from('products').delete().eq('id', id);
+  // Use .select() to verify a row was actually deleted (RLS can make delete "succeed" with 0 rows)
+  const { data, error } = await client.from('products').delete().eq('id', id).select('id');
   if (error) return error;
-  return null;
+  if (!data || data.length === 0) return false; // 0 rows deleted
+  return true;
 }
 
 export const deleteProduct = async (id: string) => {
   console.log('deleteProduct called with id:', id);
 
-  try {
-    const error = await deleteProductWithClient(supabase, id);
-    if (!error) {
-      console.log('Product deleted successfully (anon key)');
-      return;
-    }
-    console.error('Anon key delete failed:', error);
-
-    const serviceRoleClient = createClient(
-      supabaseUrl,
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxqa3Z3YWR1cXZhY21ydnljc2hqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MzkxMTcxOCwiZXhwIjoyMDY5NDg3NzE4fQ.yTH08Ylnmyh7Dcgy8QaQgABZrTG1LPylK1ET_MGLvlw'
-    );
-    const serviceError = await deleteProductWithClient(serviceRoleClient, id);
-    if (serviceError) {
-      console.error('Service role delete also failed:', serviceError);
-      throw serviceError;
-    }
-    console.log('Product deleted successfully (service role)');
-  } catch (err) {
-    console.error('Error in deleteProduct:', err);
-    throw err;
+  const result = await deleteProductWithClient(supabase, id);
+  if (result === true) {
+    console.log('Product deleted successfully (anon key)');
+    return;
   }
+  if (result !== false) {
+    console.error('Anon key delete failed:', result);
+  } else {
+    console.log('Anon key: 0 rows deleted (RLS?), trying service role');
+  }
+
+  const serviceRoleClient = createClient(
+    supabaseUrl,
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxqa3Z3YWR1cXZhY21ydnljc2hqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MzkxMTcxOCwiZXhwIjoyMDY5NDg3NzE4fQ.yTH08Ylnmyh7Dcgy8QaQgABZrTG1LPylK1ET_MGLvlw'
+  );
+  const serviceResult = await deleteProductWithClient(serviceRoleClient, id);
+  if (serviceResult === true) {
+    console.log('Product deleted successfully (service role)');
+    return;
+  }
+  if (serviceResult === false) {
+    throw new Error('Product could not be deleted (0 rows affected). You may not have permission or the product may not exist.');
+  }
+  console.error('Service role delete failed:', serviceResult);
+  throw serviceResult;
 };
 
 export const createStockMovement = async (movement: Omit<Database['public']['Tables']['stock_movements']['Insert'], 'id'>) => {
