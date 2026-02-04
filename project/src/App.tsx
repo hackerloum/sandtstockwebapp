@@ -211,7 +211,8 @@ function AppContent() {
         setMovements(prev => prev.filter(m => m.product_id !== id));
       } catch (err) {
         console.error('Error deleting product:', err);
-        setError(err instanceof Error ? err.message : 'Failed to delete product');
+        const message = err instanceof Error ? err.message : (err && typeof (err as { message?: string }).message === 'string' ? (err as { message: string }).message : 'Failed to delete product');
+        setError(message);
       }
     }
   };

@@ -856,13 +856,32 @@ export const updateProduct = async (id: string, updates: Partial<Database['publi
   }
 };
 
+/** Extract a readable message from Supabase/PostgREST error (may have message, code, details). */
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === 'object') {
+    const o = err as Record<string, unknown>;
+    const msg = typeof o.message === 'string' ? o.message : null;
+    const code = typeof o.code === 'string' ? o.code : null;
+    const details = typeof o.details === 'string' ? o.details : null;
+    if (msg || code || details) return [msg, code, details].filter(Boolean).join(' — ');
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return String(err);
+    }
+  }
+  return String(err);
+}
+
 /** Delete related rows then product (satisfies FK constraints). Returns error or true if product was deleted, false if 0 rows deleted. */
 async function deleteProductWithClient(
   client: ReturnType<typeof createClient>,
   id: string
 ): Promise<{ error: unknown } | true | false> {
-  // Order: dependents first, then product (stock_movements → product_batches → order_items, purchase_order_items → products)
+  // Order: all dependents first (product_reports, stock_movements, product_batches, order_items, purchase_order_items), then product
   const tables = [
+    { table: 'product_reports' as const, column: 'product_id' },
     { table: 'stock_movements' as const, column: 'product_id' },
     { table: 'product_batches' as const, column: 'product_id' },
     { table: 'order_items' as const, column: 'product_id' },
@@ -888,7 +907,7 @@ export const deleteProduct = async (id: string) => {
     return;
   }
   if (result !== false) {
-    console.error('Anon key delete failed:', result);
+    console.error('Anon key delete failed:', getErrorMessage(result));
   } else {
     console.log('Anon key: 0 rows deleted (RLS?), trying service role');
   }
@@ -905,8 +924,9 @@ export const deleteProduct = async (id: string) => {
   if (serviceResult === false) {
     throw new Error('Product could not be deleted (0 rows affected). You may not have permission or the product may not exist.');
   }
-  console.error('Service role delete failed:', serviceResult);
-  throw serviceResult;
+  const msg = getErrorMessage(serviceResult);
+  console.error('Service role delete failed:', msg);
+  throw new Error(msg);
 };
 
 export const createStockMovement = async (movement: Omit<Database['public']['Tables']['stock_movements']['Insert'], 'id'>) => {
