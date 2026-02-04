@@ -879,16 +879,17 @@ async function deleteProductWithClient(
   client: ReturnType<typeof createClient>,
   id: string
 ): Promise<{ error: unknown } | true | false> {
-  // Order: all dependents first (product_reports, stock_movements, product_batches, order_items, purchase_order_items), then product
-  const tables = [
-    { table: 'product_reports' as const, column: 'product_id' },
-    { table: 'stock_movements' as const, column: 'product_id' },
-    { table: 'product_batches' as const, column: 'product_id' },
-    { table: 'order_items' as const, column: 'product_id' },
-    { table: 'purchase_order_items' as const, column: 'product_id' }
-  ] as const;
+  // Order: all dependents first, then product (any table with product_id FK must be listed)
+  const tables: { table: string; column: string }[] = [
+    { table: 'product_reports', column: 'product_id' },
+    { table: 'price_overrides', column: 'product_id' },
+    { table: 'stock_movements', column: 'product_id' },
+    { table: 'product_batches', column: 'product_id' },
+    { table: 'order_items', column: 'product_id' },
+    { table: 'purchase_order_items', column: 'product_id' }
+  ];
   for (const { table, column } of tables) {
-    const { error } = await client.from(table).delete().eq(column, id);
+    const { error } = await (client as any).from(table).delete().eq(column, id);
     if (error) return error;
   }
   // Use .select() to verify a row was actually deleted (RLS can make delete "succeed" with 0 rows)
