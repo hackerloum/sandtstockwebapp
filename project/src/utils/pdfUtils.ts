@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Order, Product } from '../types';
-import { formatCurrency, formatDate } from './stockUtils';
+import { formatCurrency, formatDate, resolveOrderItemsForDisplay } from './stockUtils';
 
 export const generateOrderPDF = (order: Order, products: Product[]) => {
   // Create A4 document (210mm x 297mm)
@@ -82,8 +82,9 @@ export const generateOrderPDF = (order: Order, products: Product[]) => {
   doc.text('Order Items', margin, currentY);
   currentY += 8;
   
-  if (order.items && order.items.length > 0) {
-    const tableData = order.items.map(item => [
+  const displayItems = resolveOrderItemsForDisplay(order, products);
+  if (displayItems.length > 0) {
+    const tableData = displayItems.map(item => [
       item.product_name,
       item.quantity.toString(),
       formatCurrency(item.unit_price),
@@ -309,8 +310,9 @@ export const generateBulkOrdersPDF = (orders: Order[], products: Product[]) => {
     currentY += 15;
     
     // Add order items summary
-    if (order.items && order.items.length > 0) {
-      const itemSummary = order.items.map(item => 
+    const bulkLines = resolveOrderItemsForDisplay(order, products);
+    if (bulkLines.length > 0) {
+      const itemSummary = bulkLines.map(item => 
         `${item.product_name} (${item.quantity} × ${formatCurrency(item.unit_price)})`
       ).join(', ');
       

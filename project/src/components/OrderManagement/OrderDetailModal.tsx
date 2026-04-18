@@ -1,7 +1,7 @@
 import React from 'react';
 import { Printer, Download, FileText, User, Phone, Mail, Calendar, Package, Info } from 'lucide-react';
 import { Order, Product } from '../../types';
-import { formatCurrency, formatDate } from '../../utils/stockUtils';
+import { formatCurrency, formatDate, resolveOrderItemsForDisplay } from '../../utils/stockUtils';
 import { printOrderPDF, printOrderPDFToWindow } from '../../utils/pdfUtils';
 import { Modal } from '../shared/Modal';
 import { Select } from '../shared/Form';
@@ -55,6 +55,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   };
 
   const orderTypeInfo = getOrderTypeInfo(order.order_type);
+  const displayItems = resolveOrderItemsForDisplay(order, products);
 
   return (
     <Modal
@@ -210,10 +211,10 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             <Package className="w-5 h-5 mr-2" />
             Order Items
           </h3>
-          {order.items && order.items.length > 0 ? (
+          {displayItems.length > 0 ? (
             <div className="space-y-2">
-              {order.items.map((item) => (
-                <div key={item.product_id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+              {displayItems.map((item) => (
+                <div key={item.key} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
                   <div>
                     <p className="font-medium">{item.product_name}</p>
                     <p className="text-sm text-gray-600">
@@ -256,7 +257,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             <p>Created By: {order.created_by || 'Not specified'}</p>
             <p>Order Type (raw): {order.order_type}</p>
             <p>Pickup by Staff: {order.pickup_by_staff?.toString() || 'Not specified'}</p>
-            <p>Items Count: {order.items?.length || 0}</p>
+            <p>Items Count: {displayItems.length}</p>
           </div>
         </div>
       </div>

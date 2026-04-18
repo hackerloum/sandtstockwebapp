@@ -953,8 +953,12 @@ export const createOrder = async (
 
   if (orderError) throw orderError;
 
-  const orderItems = items.map(item => ({
-    ...item,
+  const orderItems = items.map((item) => ({
+    product_id: item.product_id,
+    batch_id: item.batch_id ?? null,
+    quantity: item.quantity,
+    unit_price: item.unit_price,
+    total_price: item.total_price,
     order_id: orderData.id
   }));
 

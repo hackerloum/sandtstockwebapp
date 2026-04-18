@@ -1,5 +1,5 @@
 import { Database } from '../types/supabase';
-import type { StockMovement } from '../types';
+import type { Order, OrderItem, StockMovement } from '../types';
 
 type Product = Database['public']['Tables']['products']['Row'];
 
@@ -493,3 +493,54 @@ export const logActivity = (
   };
   setActivities([newActivity, ...activities]);
 };
+
+/** Line row for order detail UI / PDF — names resolved from catalog when missing; supports legacy camelCase keys. */
+export type ResolvedOrderLine = {
+  key: string;
+  product_id: string;
+  product_name: string;
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+};
+
+/**
+ * Normalize order line items for display: prefer live product names from `products`,
+ * fall back to stored line labels, and accept occasional camelCase payloads.
+ */
+export function resolveOrderItemsForDisplay(order: Order, products: Product[]): ResolvedOrderLine[] {
+  const raw = order.items ?? [];
+  const byId = new Map(products.map((p) => [p.id, p]));
+
+  return raw.map((item, index) => {
+    const r = item as OrderItem & {
+      productId?: string;
+      productName?: string;
+      unitPrice?: number;
+      totalPrice?: number;
+    };
+    const product_id = (r.product_id || r.productId || '').trim();
+    const fromCatalog = product_id ? byId.get(product_id) : undefined;
+    const nameFromLine = (r.product_name || r.productName || '').trim();
+    const product_name =
+      fromCatalog?.commercial_name ||
+      nameFromLine ||
+      (product_id ? `Product (${product_id.slice(0, 8)}…)` : 'Unknown product');
+
+    const quantity = Number(r.quantity) || 0;
+    const unit_price = Number(r.unit_price ?? r.unitPrice) || 0;
+    let total_price = Number(r.total_price ?? r.totalPrice) || 0;
+    if (total_price === 0 && quantity > 0 && unit_price > 0) {
+      total_price = Math.round(quantity * unit_price * 100) / 100;
+    }
+
+    return {
+      key: (r.id && String(r.id)) || `${product_id || 'line'}-${index}`,
+      product_id,
+      product_name,
+      quantity,
+      unit_price,
+      total_price
+    };
+  });
+}
