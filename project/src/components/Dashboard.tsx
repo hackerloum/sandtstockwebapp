@@ -1,10 +1,17 @@
 import React, { useMemo, useEffect, useState } from 'react';
 import {
   Package, AlertTriangle, TrendingDown, DollarSign,
-  ShoppingCart, Clock, BarChart2, Plus, FileText, RefreshCcw
+  ShoppingCart, Clock, BarChart2, Plus, FileText, RefreshCcw, Zap,
+  TrendingUp, Ban
 } from 'lucide-react';
 import { Product, StockMovement } from '../types';
-import { getStockStatus, formatCurrency, formatDate, calculateReorderQuantity } from '../utils/stockUtils';
+import {
+  getStockStatus,
+  formatCurrency,
+  formatDate,
+  calculateReorderQuantity,
+  buildReorderPlan
+} from '../utils/stockUtils';
 import { getProducts, getStockMovements } from '../lib/supabase';
 
 interface DashboardProps {
@@ -63,7 +70,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       .slice(0, 5);
   }, [products]);
 
-  // Top Products by Movement
+  // Top Products by Movement (any direction — for recent activity list)
   const topProductsByMovement = useMemo(() => {
     if (!products || !movements) return [];
     const movementCounts = movements.reduce((acc, movement) => {
@@ -75,6 +82,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
       .sort((a, b) => (movementCounts[b.id] || 0) - (movementCounts[a.id] || 0))
       .slice(0, 5);
   }, [products, movements]);
+
+  const reorderPlan = useMemo(
+    () => buildReorderPlan(products, movements, { limitPerBucket: 8 }),
+    [products, movements]
+  );
 
   const stats = [
     {
@@ -189,6 +201,133 @@ export const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Reorder engine: who to stock vs who to verify first */}
+        {!loading && products.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 lg:col-span-2">
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <Zap className="w-5 h-5 text-amber-500" />
+                Reorder engine
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                Uses the last 7 days of stock movements (today, yesterday, and prior week). Suggests purchase orders when
+                demand is visible; flags dead or unclear zeros so you do not reorder blindly.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Order now */}
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Zap className="w-4 h-4 text-emerald-600" />
+                  <h4 className="font-semibold text-emerald-900">Order now</h4>
+                </div>
+                <p className="text-xs text-emerald-800/80 mb-3">
+                  Out of stock but still recording stock-outs — demand is active.
+                </p>
+                {reorderPlan.orderNow.length === 0 ? (
+                  <p className="text-sm text-gray-500">None right now.</p>
+                ) : (
+                  <ul className="space-y-3">
+                    {reorderPlan.orderNow.map((row) => (
+                      <li
+                        key={row.product.id}
+                        className="rounded-lg bg-white border border-emerald-100 p-3 text-sm"
+                      >
+                        <p className="font-medium text-gray-900">{row.product.commercial_name}</p>
+                        <p className="text-gray-600 mt-1">
+                          Recent outs: {row.analytics.recentOutMovements} · {row.analytics.recentQtyOut} units
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">{row.rationale}</p>
+                        {onCreatePurchaseOrder && (
+                          <button
+                            type="button"
+                            onClick={() => onCreatePurchaseOrder(row.product.id)}
+                            className="mt-2 w-full px-3 py-1.5 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                          >
+                            Create purchase order
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Plan reorder */}
+              <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <TrendingUp className="w-4 h-4 text-amber-700" />
+                  <h4 className="font-semibold text-amber-950">Plan reorder</h4>
+                </div>
+                <p className="text-xs text-amber-900/80 mb-3">
+                  In stock but selling or moving fast — stay ahead of stock-outs.
+                </p>
+                {reorderPlan.prioritizeReorder.length === 0 ? (
+                  <p className="text-sm text-gray-500">None right now.</p>
+                ) : (
+                  <ul className="space-y-3">
+                    {reorderPlan.prioritizeReorder.map((row) => (
+                      <li
+                        key={row.product.id}
+                        className="rounded-lg bg-white border border-amber-100 p-3 text-sm"
+                      >
+                        <p className="font-medium text-gray-900">{row.product.commercial_name}</p>
+                        <p className="text-gray-600 mt-1">
+                          Stock {row.product.current_stock} · Recent outs {row.analytics.recentOutMovements} · Movement{' '}
+                          {row.analytics.recentTotalMovements} (7d)
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">{row.rationale}</p>
+                        {onCreatePurchaseOrder && (
+                          <button
+                            type="button"
+                            onClick={() => onCreatePurchaseOrder(row.product.id)}
+                            className="mt-2 w-full px-3 py-1.5 text-sm font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700"
+                          >
+                            Create purchase order
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Do not auto-order */}
+              <div className="rounded-xl border border-slate-300 bg-slate-50 p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Ban className="w-4 h-4 text-slate-600" />
+                  <h4 className="font-semibold text-slate-900">Do not auto-order</h4>
+                </div>
+                <p className="text-xs text-slate-600 mb-3">
+                  At zero stock with no recent sales outs — review before buying.
+                </p>
+                {reorderPlan.reviewBeforeOrder.length === 0 ? (
+                  <p className="text-sm text-gray-500">None right now.</p>
+                ) : (
+                  <ul className="space-y-3">
+                    {reorderPlan.reviewBeforeOrder.map((row) => (
+                      <li
+                        key={row.product.id}
+                        className="rounded-lg bg-white border border-slate-200 p-3 text-sm"
+                      >
+                        <p className="font-medium text-gray-900">{row.product.commercial_name}</p>
+                        <p className="text-gray-600 mt-1">
+                          Stock 0 · Recent outs {row.analytics.recentOutMovements} · Activity {row.analytics.recentTotalMovements}{' '}
+                          (7d)
+                        </p>
+                        <p className="text-xs text-slate-600 mt-1">{row.rationale}</p>
+                        <p className="mt-2 text-xs font-medium text-slate-500 uppercase tracking-wide">
+                          No suggested PO — verify first
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Stock Alerts */}
         {(outOfStock > 0 || lowStock > 0) && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
