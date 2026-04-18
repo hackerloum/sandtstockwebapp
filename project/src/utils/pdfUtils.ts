@@ -383,6 +383,22 @@ function truncateReorderRationale(text: string, max = 120): string {
   return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
 }
 
+/** Per-unit net weight (kg) × suggested units; returns null when weight is missing or invalid. */
+function suggestedOrderKg(
+  suggestedUnits: number,
+  netWeightKgPerUnit: number | null | undefined
+): number | null {
+  const w = netWeightKgPerUnit == null ? NaN : Number(netWeightKgPerUnit);
+  if (!Number.isFinite(w) || w <= 0) return null;
+  const u = Number(suggestedUnits);
+  if (!Number.isFinite(u) || u <= 0) return null;
+  return u * w;
+}
+
+function formatSuggestedKgCell(kg: number | null): string {
+  return kg == null ? '—' : kg.toFixed(2);
+}
+
 /**
  * Downloads a PDF listing one reorder-engine section (Order now, Plan reorder, or Do not auto-order).
  */
@@ -393,6 +409,7 @@ export function downloadReorderSectionPdf<
     current_stock: number;
     min_stock: number;
     max_stock: number;
+    net_weight: number;
   }
 >(slug: ReorderSectionPdfSlug, sectionTitle: string, rows: ReorderEngineRow<P>[]): void {
   if (rows.length === 0) return;
@@ -422,7 +439,7 @@ export function downloadReorderSectionPdf<
   y = 32;
   doc.setFontSize(8);
   doc.text(
-    `Generated ${formatDate(new Date())} · ${rows.length} line(s) · Demand units = stock-outs + sales orders · Recent = today+yesterday+last 7d · Suggested cap ${MAX_SUGGESTED_REORDER_UNITS} u per SKU (and max stock headroom)`,
+    `Generated ${formatDate(new Date())} · ${rows.length} line(s) · Demand units = stock-outs + sales orders · Recent = today+yesterday+last 7d · Suggested cap ${MAX_SUGGESTED_REORDER_UNITS} u per SKU (and max stock headroom) · Sugg (kg) = suggested units × net weight (kg/unit)`,
     margin,
     y
   );
@@ -430,14 +447,33 @@ export function downloadReorderSectionPdf<
 
   const showPriority = slug === 'order-now';
 
+  const totalSuggestedKg = rows.reduce((sum, row) => {
+    const kg = suggestedOrderKg(row.suggestedOrderQty, row.product.net_weight);
+    return kg == null ? sum : sum + kg;
+  }, 0);
+
   const head = showPriority
-    ? [['#', 'Priority', 'Product', 'Code', 'Stock', 'Demand (u)', 'Recent (u)', 'Suggested', 'Rationale']]
-    : [['#', 'Product', 'Code', 'Stock', 'Demand (u)', 'Recent (u)', 'Suggested', 'Rationale']];
+    ? [
+        [
+          '#',
+          'Priority',
+          'Product',
+          'Code',
+          'Stock',
+          'Demand (u)',
+          'Recent (u)',
+          'Sugg (u)',
+          'Sugg (kg)',
+          'Rationale'
+        ]
+      ]
+    : [['#', 'Product', 'Code', 'Stock', 'Demand (u)', 'Recent (u)', 'Sugg (u)', 'Sugg (kg)', 'Rationale']];
 
   const body = rows.map((row, idx) => {
     const p = row.product;
     const a = row.analytics;
     const shortRat = truncateReorderRationale(row.rationale);
+    const kgLine = suggestedOrderKg(row.suggestedOrderQty, p.net_weight);
     const pr = row.demandPriority
       ? row.demandPriority === 'critical'
         ? 'Critical'
@@ -455,6 +491,7 @@ export function downloadReorderSectionPdf<
         String(effectiveDemandQty(a)),
         String(recentWindowDemandQty(a)),
         String(row.suggestedOrderQty),
+        formatSuggestedKgCell(kgLine),
         shortRat
       ];
     }
@@ -466,6 +503,7 @@ export function downloadReorderSectionPdf<
       String(effectiveDemandQty(a)),
       String(recentWindowDemandQty(a)),
       String(row.suggestedOrderQty),
+      formatSuggestedKgCell(kgLine),
       shortRat
     ];
   });
@@ -481,27 +519,45 @@ export function downloadReorderSectionPdf<
     styles: { cellPadding: 1.5, overflow: 'linebreak' },
     columnStyles: showPriority
       ? {
-          0: { cellWidth: 10, halign: 'center' },
-          1: { cellWidth: 18 },
-          2: { cellWidth: 42 },
-          3: { cellWidth: 22 },
-          4: { cellWidth: 14, halign: 'right' },
-          5: { cellWidth: 18, halign: 'right' },
-          6: { cellWidth: 18, halign: 'right' },
-          7: { cellWidth: 16, halign: 'right' },
-          8: { cellWidth: 72 }
+          0: { cellWidth: 9, halign: 'center' },
+          1: { cellWidth: 16 },
+          2: { cellWidth: 38 },
+          3: { cellWidth: 20 },
+          4: { cellWidth: 12, halign: 'right' },
+          5: { cellWidth: 16, halign: 'right' },
+          6: { cellWidth: 16, halign: 'right' },
+          7: { cellWidth: 14, halign: 'right' },
+          8: { cellWidth: 14, halign: 'right' },
+          9: { cellWidth: 58 }
         }
       : {
-          0: { cellWidth: 10, halign: 'center' },
-          1: { cellWidth: 48 },
-          2: { cellWidth: 24 },
-          3: { cellWidth: 16, halign: 'right' },
-          4: { cellWidth: 20, halign: 'right' },
-          5: { cellWidth: 20, halign: 'right' },
-          6: { cellWidth: 18, halign: 'right' },
-          7: { cellWidth: 88 }
+          0: { cellWidth: 9, halign: 'center' },
+          1: { cellWidth: 44 },
+          2: { cellWidth: 22 },
+          3: { cellWidth: 14, halign: 'right' },
+          4: { cellWidth: 18, halign: 'right' },
+          5: { cellWidth: 18, halign: 'right' },
+          6: { cellWidth: 14, halign: 'right' },
+          7: { cellWidth: 14, halign: 'right' },
+          8: { cellWidth: 75 }
         }
   });
+
+  const tableBottom = (doc as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? y;
+  let summaryY = tableBottom + 8;
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0, 0, 0);
+  doc.text(`Total suggested weight (this list): ${totalSuggestedKg.toFixed(2)} kg`, margin, summaryY);
+  summaryY += 5;
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(60, 60, 60);
+  doc.text(
+    'Rows with no net weight on the product show "—" in Sugg (kg) and are excluded from the total.',
+    margin,
+    summaryY
+  );
 
   const safeSlug = slug.replace(/[^a-z0-9-]+/gi, '-');
   const stamp = new Date().toISOString().slice(0, 10);
