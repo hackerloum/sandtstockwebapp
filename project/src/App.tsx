@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { BarChart3, Package, ArrowUpDown, Home, Plus, ShoppingCart, FileText, Activity, LogOut, Menu, AlertCircle, X, CheckCircle } from 'lucide-react';
+import { BarChart3, Package, ArrowUpDown, Home, Plus, ShoppingCart, FileText, Activity, LogOut, Menu, AlertCircle, X, CheckCircle, Zap } from 'lucide-react';
 import { Product, StockMovement, Order, PurchaseOrder, Brand, Supplier, ActivityLog } from './types';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
 import { Dashboard } from './components/Dashboard';
+import { ReorderEnginePage } from './components/ReorderEnginePage';
 import { ProductList } from './components/ProductList';
 import { EditProductPage } from './components/EditProductPage';
 import { ProductDetail } from './components/ProductDetail';
@@ -35,7 +36,7 @@ import {
   testProductVisibility
 } from './lib/supabase';
 
-type ActiveTab = 'dashboard' | 'products' | 'add-product' | 'edit-product' | 'movements' | 'orders' | 'purchase-orders' | 'reports' | 'product-reports' | 'activity' | 'debug';
+type ActiveTab = 'dashboard' | 'products' | 'add-product' | 'edit-product' | 'movements' | 'orders' | 'purchase-orders' | 'reports' | 'product-reports' | 'activity' | 'reorder-engine' | 'debug';
 
 type ProductListScrollState = {
   scrollOffset: number;
@@ -307,6 +308,7 @@ function AppContent() {
   ];
 
   const secondaryTabs = [
+    { id: 'reorder-engine', label: 'Reorder engine', icon: Zap, permission: 'view_dashboard' },
     { id: 'movements', label: 'Stock Movements', icon: ArrowUpDown, permission: 'view_movements' },
     { id: 'reports', label: 'Reports', icon: BarChart3, permission: 'view_reports' },
     { id: 'product-reports', label: 'Product Reports', icon: FileText, permission: 'view_reports' },
@@ -574,6 +576,22 @@ function AppContent() {
               setActiveTab('movements');
             }}
             onNavigate={(tab) => setActiveTab(tab as ActiveTab)}
+            onOpenReorderEngine={() => setActiveTab('reorder-engine')}
+          />
+        )}
+
+        {activeTab === 'reorder-engine' && hasPermission('view_dashboard') && (
+          <ReorderEnginePage
+            products={products}
+            movements={movements}
+            orders={orders}
+            loading={loading}
+            onBack={() => setActiveTab('dashboard')}
+            onCreatePurchaseOrder={(productId) => {
+              if (products.find((p) => p.id === productId)) {
+                setActiveTab('purchase-orders');
+              }
+            }}
           />
         )}
 

@@ -365,13 +365,20 @@ export const buildReorderPlan = <
   movements: Array<
     Pick<StockMovement, 'product_id' | 'movement_type' | 'quantity' | 'performed_at'>
   >,
-  options?: { limitPerBucket?: number; orders?: OrderForDemand[] }
+  options?: {
+    limitPerBucket?: number;
+    orders?: OrderForDemand[];
+    /** When true, return every product in each bucket (no cap). */
+    unlimited?: boolean;
+  }
 ): {
   orderNow: ReorderEngineRow<P>[];
   prioritizeReorder: ReorderEngineRow<P>[];
   reviewBeforeOrder: ReorderEngineRow<P>[];
 } => {
-  const limit = options?.limitPerBucket ?? 8;
+  const limit = options?.unlimited
+    ? Number.POSITIVE_INFINITY
+    : (options?.limitPerBucket ?? 8);
   const analyticsMap = computeProductDemandAnalytics(movements, options?.orders);
 
   const orderNow: ReorderEngineRow<P>[] = [];

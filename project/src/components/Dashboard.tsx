@@ -22,6 +22,8 @@ interface DashboardProps {
   onCreateOrder?: () => void;
   onStockCount?: () => void;
   onNavigate?: (tab: string) => void;
+  /** Opens the full reorder engine page (all items). */
+  onOpenReorderEngine?: () => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -29,7 +31,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onAddProduct,
   onCreateOrder,
   onStockCount,
-  onNavigate
+  onNavigate,
+  onOpenReorderEngine
 }) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
@@ -209,17 +212,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
         {/* Reorder engine: who to stock vs who to verify first */}
         {!loading && products.length > 0 && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 lg:col-span-2">
-            <div className="mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                <Zap className="w-5 h-5 text-amber-500" />
-                Reorder engine
-              </h3>
-              <p className="text-sm text-gray-500 mt-1">
-                Demand combines <strong className="font-medium text-gray-700">stock-outs</strong> and{' '}
-                <strong className="font-medium text-gray-700">customer orders</strong> (by order date) across the same
-                timeline. Use this when stock movements are incomplete. Suggested order quantity targets the midpoint
-                between min and max stock.
-              </p>
+            <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <Zap className="w-5 h-5 text-amber-500 shrink-0" />
+                  Reorder engine
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Demand combines <strong className="font-medium text-gray-700">stock-outs</strong> and{' '}
+                  <strong className="font-medium text-gray-700">customer orders</strong> (by order date) across the same
+                  timeline. Use this when stock movements are incomplete. Suggested order quantity targets the midpoint
+                  between min and max stock.
+                </p>
+              </div>
+              {onOpenReorderEngine && (
+                <button
+                  type="button"
+                  onClick={onOpenReorderEngine}
+                  className="shrink-0 text-sm font-medium text-amber-800 bg-amber-100 hover:bg-amber-200 px-4 py-2 rounded-lg border border-amber-200 transition-colors"
+                >
+                  View full list
+                </button>
+              )}
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Order now */}
