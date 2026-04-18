@@ -9,16 +9,20 @@ export type UpdatedTimeline = 'today' | 'yesterday' | 'last_week' | 'older';
 /** Per-product movement analytics (outs for demand; ins + outs for “how busy” the SKU is). */
 export type ProductMovementAnalytics = {
   productId: string;
-  /** Out movements in today + yesterday + last_week */
-  recentOutMovements: number;
-  recentQtyOut: number;
-  /** In movements in that same recent window */
-  recentInMovements: number;
-  /** All movement rows (in + out) in the recent window */
-  recentTotalMovements: number;
-  /** All movement rows all-time */
+  /** Out movement rows summed across all {@link timelineBreakdown} buckets (today … older) */
+  timelineOutMovements: number;
+  /** Units out summed across all timeline buckets */
+  timelineOutQty: number;
+  totalInMovements: number;
+  /** Every stock movement row (in + out), all time */
   totalMovementsAll: number;
+  /** Stock-out rows per timeline bucket */
   timelineBreakdown: Record<
+    UpdatedTimeline,
+    { movements: number; qty: number }
+  >;
+  /** Stock-in rows per timeline bucket */
+  inTimelineBreakdown: Record<
     UpdatedTimeline,
     { movements: number; qty: number }
   >;
@@ -38,18 +42,38 @@ const emptyTimelineBreakdown = (): ProductMovementAnalytics['timelineBreakdown']
 
 export const emptyMovementAnalytics = (productId: string): ProductMovementAnalytics => ({
   productId,
-  recentOutMovements: 0,
-  recentQtyOut: 0,
-  recentInMovements: 0,
-  recentTotalMovements: 0,
+  timelineOutMovements: 0,
+  timelineOutQty: 0,
+  totalInMovements: 0,
   totalMovementsAll: 0,
   timelineBreakdown: emptyTimelineBreakdown(),
+  inTimelineBreakdown: emptyTimelineBreakdown(),
   totalOutMovements: 0,
   totalQtyOut: 0
 });
 
+/** Compact label for outbound counts per timeline bucket (all buckets). */
+export const formatOutTimelineSummary = (
+  b: ProductMovementAnalytics['timelineBreakdown']
+): string => {
+  const parts: string[] = [];
+  if (b.today.movements || b.today.qty) {
+    parts.push(`Today ${b.today.movements}× / ${b.today.qty}u`);
+  }
+  if (b.yesterday.movements || b.yesterday.qty) {
+    parts.push(`Yesterday ${b.yesterday.movements}× / ${b.yesterday.qty}u`);
+  }
+  if (b.last_week.movements || b.last_week.qty) {
+    parts.push(`Last 7d ${b.last_week.movements}× / ${b.last_week.qty}u`);
+  }
+  if (b.older.movements || b.older.qty) {
+    parts.push(`Older ${b.older.movements}× / ${b.older.qty}u`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : 'No stock-outs recorded';
+};
+
 /**
- * Aggregates stock movements per product: outbound timeline buckets plus recent in/out counts.
+ * Aggregates stock movements per product: full timelineBreakdown (today … older) for in and out.
  */
 export const computeProductMovementAnalytics = (
   movements: Array<
@@ -65,15 +89,14 @@ export const computeProductMovementAnalytics = (
     }
     const row = map.get(id)!;
     const timeline = getUpdatedTimeline(m.performed_at);
-    const isRecent = timeline !== 'older';
     const qty = Number(m.quantity) || 0;
 
     row.totalMovementsAll += 1;
-    if (isRecent) {
-      row.recentTotalMovements += 1;
-      if (m.movement_type === 'in') {
-        row.recentInMovements += 1;
-      }
+
+    if (m.movement_type === 'in') {
+      row.totalInMovements += 1;
+      row.inTimelineBreakdown[timeline].movements += 1;
+      row.inTimelineBreakdown[timeline].qty += qty;
     }
 
     if (m.movement_type === 'out') {
@@ -86,9 +109,12 @@ export const computeProductMovementAnalytics = (
 
   for (const row of map.values()) {
     const b = row.timelineBreakdown;
-    row.recentOutMovements =
-      b.today.movements + b.yesterday.movements + b.last_week.movements;
-    row.recentQtyOut = b.today.qty + b.yesterday.qty + b.last_week.qty;
+    row.timelineOutMovements =
+      b.today.movements +
+      b.yesterday.movements +
+      b.last_week.movements +
+      b.older.movements;
+    row.timelineOutQty = b.today.qty + b.yesterday.qty + b.last_week.qty + b.older.qty;
   }
 
   return map;
@@ -114,29 +140,39 @@ export type ReorderEngineRow<
   /** When false, avoid placing a blind purchase order without human review */
   suggestPurchaseOrder: boolean;
   rationale: string;
+  /** Units to order toward mid-point between min and max stock (same as calculateReorderQuantity). */
+  suggestedOrderQty: number;
 };
 
 const sortOrderNow = (
   a: { analytics: ProductMovementAnalytics },
   b: { analytics: ProductMovementAnalytics }
 ) => {
-  if (b.analytics.recentQtyOut !== a.analytics.recentQtyOut) {
-    return b.analytics.recentQtyOut - a.analytics.recentQtyOut;
+  if (b.analytics.timelineOutQty !== a.analytics.timelineOutQty) {
+    return b.analytics.timelineOutQty - a.analytics.timelineOutQty;
   }
-  return b.analytics.recentOutMovements - a.analytics.recentOutMovements;
+  return b.analytics.timelineOutMovements - a.analytics.timelineOutMovements;
 };
 
 const sortPrioritize = (
   a: { analytics: ProductMovementAnalytics },
   b: { analytics: ProductMovementAnalytics }
 ) => {
-  if (b.analytics.recentOutMovements !== a.analytics.recentOutMovements) {
-    return b.analytics.recentOutMovements - a.analytics.recentOutMovements;
+  if (b.analytics.timelineOutMovements !== a.analytics.timelineOutMovements) {
+    return b.analytics.timelineOutMovements - a.analytics.timelineOutMovements;
   }
-  if (b.analytics.recentQtyOut !== a.analytics.recentQtyOut) {
-    return b.analytics.recentQtyOut - a.analytics.recentQtyOut;
+  if (b.analytics.timelineOutQty !== a.analytics.timelineOutQty) {
+    return b.analytics.timelineOutQty - a.analytics.timelineOutQty;
   }
-  return b.analytics.recentTotalMovements - a.analytics.recentTotalMovements;
+  return b.analytics.totalMovementsAll - a.analytics.totalMovementsAll;
+};
+
+/** Target mid-point between min/max minus current stock (shared with {@link calculateReorderQuantity}). */
+export const getSuggestedOrderQuantity = (
+  product: Pick<Product, 'current_stock' | 'min_stock' | 'max_stock'>
+): number => {
+  const targetStock = Math.ceil((product.max_stock + product.min_stock) / 2);
+  return Math.max(0, targetStock - product.current_stock);
 };
 
 function shouldPrioritizeReorder(
@@ -144,8 +180,8 @@ function shouldPrioritizeReorder(
   a: ProductMovementAnalytics
 ): boolean {
   if (product.current_stock <= 0) return false;
-  if (a.recentOutMovements > 0) return true;
-  if (a.recentTotalMovements >= 4) return true;
+  if (a.timelineOutMovements > 0) return true;
+  if (a.totalMovementsAll >= 4) return true;
   if (
     product.current_stock > 0 &&
     product.current_stock <= product.min_stock &&
@@ -162,30 +198,24 @@ function buildRationale(
   product: Pick<Product, 'current_stock' | 'min_stock'>
 ): string {
   if (bucket === 'order_now') {
-    return 'Out of stock with recent stock-outs — replenish urgently.';
+    return 'Out of stock with stock-outs across the timeline — replenish urgently.';
   }
   if (bucket === 'prioritize_reorder') {
-    if (a.recentOutMovements > 0) {
-      return 'Recent sales activity — plan a purchase order before you run out.';
+    if (a.timelineOutMovements > 0) {
+      return 'Sales outs recorded in the timeline — plan a purchase order before you run out.';
     }
-    if (a.recentTotalMovements >= 4) {
-      return 'High movement (stock in/out) in the last 7 days — keep an eye on levels.';
+    if (a.totalMovementsAll >= 4) {
+      return 'High stock movement (in/out) overall — keep an eye on levels.';
     }
     if (product.current_stock <= product.min_stock && a.totalOutMovements > 0) {
       return 'Below minimum with past sales — consider reordering.';
     }
     return 'Eligible for planned reorder.';
   }
-  if (a.recentTotalMovements === 0 && a.totalMovementsAll === 0) {
+  if (a.totalMovementsAll === 0) {
     return 'At zero with no movement history — confirm the SKU is active before ordering.';
   }
-  if (a.recentTotalMovements === 0) {
-    return 'At zero with no activity in the last 7 days — stale listing; confirm demand before ordering.';
-  }
-  if (a.recentOutMovements === 0 && a.recentTotalMovements > 0) {
-    return 'At zero with no recent sales outs — do not auto-order; check transfers, adjustments, or demand.';
-  }
-  return 'At zero with no recent stock-outs — verify demand or discontinuation before restocking.';
+  return 'At zero with no stock-outs in the timeline — do not auto-order; check transfers, adjustments, or demand.';
 }
 
 /**
@@ -220,22 +250,25 @@ export const buildReorderPlan = <
   for (const product of products) {
     const a = analyticsMap.get(product.id) ?? emptyMovementAnalytics(product.id);
     const oos = product.current_stock <= 0;
+    const suggestedOrderQty = getSuggestedOrderQuantity(product);
 
-    if (oos && a.recentOutMovements > 0) {
+    if (oos && a.timelineOutMovements > 0) {
       orderNow.push({
         product,
         analytics: a,
         bucket: 'order_now',
         suggestPurchaseOrder: true,
-        rationale: buildRationale('order_now', a, product)
+        rationale: buildRationale('order_now', a, product),
+        suggestedOrderQty
       });
-    } else if (oos && a.recentOutMovements === 0) {
+    } else if (oos && a.timelineOutMovements === 0) {
       reviewBeforeOrder.push({
         product,
         analytics: a,
         bucket: 'review_before_order',
         suggestPurchaseOrder: false,
-        rationale: buildRationale('review_before_order', a, product)
+        rationale: buildRationale('review_before_order', a, product),
+        suggestedOrderQty
       });
     } else if (!oos && shouldPrioritizeReorder(product, a)) {
       prioritizeReorder.push({
@@ -243,7 +276,8 @@ export const buildReorderPlan = <
         analytics: a,
         bucket: 'prioritize_reorder',
         suggestPurchaseOrder: true,
-        rationale: buildRationale('prioritize_reorder', a, product)
+        rationale: buildRationale('prioritize_reorder', a, product),
+        suggestedOrderQty
       });
     }
   }
@@ -251,8 +285,8 @@ export const buildReorderPlan = <
   orderNow.sort(sortOrderNow);
   prioritizeReorder.sort(sortPrioritize);
   reviewBeforeOrder.sort((x, y) => {
-    const az = x.analytics.recentTotalMovements + x.analytics.totalMovementsAll;
-    const bz = y.analytics.recentTotalMovements + y.analytics.totalMovementsAll;
+    const az = x.analytics.totalMovementsAll;
+    const bz = y.analytics.totalMovementsAll;
     return az - bz;
   });
 
@@ -285,11 +319,11 @@ export const getRecommendedProductsByOutgoing = <
     .filter(({ stats }) => stats.totalOutMovements > 0)
     .filter(({ product }) => product.current_stock > 0)
     .sort((a, b) => {
-      if (b.stats.recentOutMovements !== a.stats.recentOutMovements) {
-        return b.stats.recentOutMovements - a.stats.recentOutMovements;
+      if (b.stats.timelineOutMovements !== a.stats.timelineOutMovements) {
+        return b.stats.timelineOutMovements - a.stats.timelineOutMovements;
       }
-      if (b.stats.recentQtyOut !== a.stats.recentQtyOut) {
-        return b.stats.recentQtyOut - a.stats.recentQtyOut;
+      if (b.stats.timelineOutQty !== a.stats.timelineOutQty) {
+        return b.stats.timelineOutQty - a.stats.timelineOutQty;
       }
       return b.stats.totalOutMovements - a.stats.totalOutMovements;
     })
@@ -363,10 +397,8 @@ export const formatWeight = (weight: number) => {
   return `${weight.toFixed(3)}kg`;
 };
 
-export const calculateReorderQuantity = (product: Product) => {
-  const targetStock = Math.ceil((product.max_stock + product.min_stock) / 2);
-  return Math.max(0, targetStock - product.current_stock);
-};
+export const calculateReorderQuantity = (product: Product) =>
+  getSuggestedOrderQuantity(product);
 
 // Stock status colors
 export const getStockStatusColor = (status: string) => {
