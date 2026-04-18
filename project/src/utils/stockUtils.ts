@@ -28,6 +28,15 @@ export type ProductMovementAnalytics = {
   >;
   totalOutMovements: number;
   totalQtyOut: number;
+  /** Customer order lines (non-cancelled orders), bucketed by order date — fills gaps when stock-outs aren’t posted */
+  salesOrderTimelineBreakdown: Record<
+    UpdatedTimeline,
+    { movements: number; qty: number }
+  >;
+  /** Total order lines (rows) across timeline */
+  salesOrderLines: number;
+  /** Units ordered across all sales order lines */
+  salesOrderQty: number;
 };
 
 /** @deprecated Use ProductMovementAnalytics */
@@ -49,8 +58,19 @@ export const emptyMovementAnalytics = (productId: string): ProductMovementAnalyt
   timelineBreakdown: emptyTimelineBreakdown(),
   inTimelineBreakdown: emptyTimelineBreakdown(),
   totalOutMovements: 0,
-  totalQtyOut: 0
+  totalQtyOut: 0,
+  salesOrderTimelineBreakdown: emptyTimelineBreakdown(),
+  salesOrderLines: 0,
+  salesOrderQty: 0
 });
+
+/** Stock-out lines + sales order lines (combined demand signal for reorder). */
+export const effectiveDemandLines = (a: ProductMovementAnalytics): number =>
+  a.timelineOutMovements + a.salesOrderLines;
+
+/** Units from stock-outs + units from sales orders. */
+export const effectiveDemandQty = (a: ProductMovementAnalytics): number =>
+  a.timelineOutQty + a.salesOrderQty;
 
 /** Compact label for outbound counts per timeline bucket (all buckets). */
 export const formatOutTimelineSummary = (
@@ -70,6 +90,26 @@ export const formatOutTimelineSummary = (
     parts.push(`Older ${b.older.movements}× / ${b.older.qty}u`);
   }
   return parts.length > 0 ? parts.join(' · ') : 'No stock-outs recorded';
+};
+
+/** Same shape as stock-outs; `movements` = order line count per bucket. */
+export const formatSalesOrderTimelineSummary = (
+  b: ProductMovementAnalytics['salesOrderTimelineBreakdown']
+): string => {
+  const parts: string[] = [];
+  if (b.today.movements || b.today.qty) {
+    parts.push(`Today ${b.today.movements} lines / ${b.today.qty}u`);
+  }
+  if (b.yesterday.movements || b.yesterday.qty) {
+    parts.push(`Yesterday ${b.yesterday.movements} lines / ${b.yesterday.qty}u`);
+  }
+  if (b.last_week.movements || b.last_week.qty) {
+    parts.push(`Last 7d ${b.last_week.movements} lines / ${b.last_week.qty}u`);
+  }
+  if (b.older.movements || b.older.qty) {
+    parts.push(`Older ${b.older.movements} lines / ${b.older.qty}u`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : 'No sales orders';
 };
 
 /**
@@ -120,6 +160,85 @@ export const computeProductMovementAnalytics = (
   return map;
 };
 
+export type OrderForDemand = Pick<Order, 'created_at' | 'status'> & {
+  items?: Array<Pick<OrderItem, 'product_id' | 'quantity'>>;
+};
+
+/**
+ * Demand from customer orders (order date timeline). Cancelled orders excluded.
+ */
+export const computeSalesOrderDemandByProduct = (
+  orders: OrderForDemand[]
+): Map<
+  string,
+  {
+    breakdown: ProductMovementAnalytics['salesOrderTimelineBreakdown'];
+    salesOrderLines: number;
+    salesOrderQty: number;
+  }
+> => {
+  const map = new Map<
+    string,
+    {
+      breakdown: ProductMovementAnalytics['salesOrderTimelineBreakdown'];
+      salesOrderLines: number;
+      salesOrderQty: number;
+    }
+  >();
+
+  for (const order of orders) {
+    if (order.status === 'cancelled') continue;
+    const timeline = getUpdatedTimeline(order.created_at);
+    for (const item of order.items || []) {
+      const id = item.product_id;
+      const qty = Number(item.quantity) || 0;
+      if (!map.has(id)) {
+        map.set(id, {
+          breakdown: emptyTimelineBreakdown(),
+          salesOrderLines: 0,
+          salesOrderQty: 0
+        });
+      }
+      const row = map.get(id)!;
+      row.breakdown[timeline].movements += 1;
+      row.breakdown[timeline].qty += qty;
+      row.salesOrderLines += 1;
+      row.salesOrderQty += qty;
+    }
+  }
+
+  return map;
+};
+
+/**
+ * Movement analytics plus sales-order demand (same timeline buckets).
+ */
+export const computeProductDemandAnalytics = (
+  movements: Array<
+    Pick<StockMovement, 'product_id' | 'movement_type' | 'quantity' | 'performed_at'>
+  >,
+  orders?: OrderForDemand[]
+): Map<string, ProductMovementAnalytics> => {
+  const base = computeProductMovementAnalytics(movements);
+  const orderMap = orders?.length ? computeSalesOrderDemandByProduct(orders) : null;
+
+  if (!orderMap || orderMap.size === 0) {
+    return base;
+  }
+
+  for (const [productId, od] of orderMap) {
+    if (!base.has(productId)) {
+      base.set(productId, emptyMovementAnalytics(productId));
+    }
+    const row = base.get(productId)!;
+    row.salesOrderTimelineBreakdown = od.breakdown;
+    row.salesOrderLines = od.salesOrderLines;
+    row.salesOrderQty = od.salesOrderQty;
+  }
+
+  return base;
+};
+
 /** @deprecated Use computeProductMovementAnalytics */
 export const computeProductOutVelocity = computeProductMovementAnalytics;
 
@@ -148,21 +267,21 @@ const sortOrderNow = (
   a: { analytics: ProductMovementAnalytics },
   b: { analytics: ProductMovementAnalytics }
 ) => {
-  if (b.analytics.timelineOutQty !== a.analytics.timelineOutQty) {
-    return b.analytics.timelineOutQty - a.analytics.timelineOutQty;
+  if (effectiveDemandQty(b.analytics) !== effectiveDemandQty(a.analytics)) {
+    return effectiveDemandQty(b.analytics) - effectiveDemandQty(a.analytics);
   }
-  return b.analytics.timelineOutMovements - a.analytics.timelineOutMovements;
+  return effectiveDemandLines(b.analytics) - effectiveDemandLines(a.analytics);
 };
 
 const sortPrioritize = (
   a: { analytics: ProductMovementAnalytics },
   b: { analytics: ProductMovementAnalytics }
 ) => {
-  if (b.analytics.timelineOutMovements !== a.analytics.timelineOutMovements) {
-    return b.analytics.timelineOutMovements - a.analytics.timelineOutMovements;
+  if (effectiveDemandLines(b.analytics) !== effectiveDemandLines(a.analytics)) {
+    return effectiveDemandLines(b.analytics) - effectiveDemandLines(a.analytics);
   }
-  if (b.analytics.timelineOutQty !== a.analytics.timelineOutQty) {
-    return b.analytics.timelineOutQty - a.analytics.timelineOutQty;
+  if (effectiveDemandQty(b.analytics) !== effectiveDemandQty(a.analytics)) {
+    return effectiveDemandQty(b.analytics) - effectiveDemandQty(a.analytics);
   }
   return b.analytics.totalMovementsAll - a.analytics.totalMovementsAll;
 };
@@ -180,12 +299,12 @@ function shouldPrioritizeReorder(
   a: ProductMovementAnalytics
 ): boolean {
   if (product.current_stock <= 0) return false;
-  if (a.timelineOutMovements > 0) return true;
+  if (effectiveDemandLines(a) > 0) return true;
   if (a.totalMovementsAll >= 4) return true;
   if (
     product.current_stock > 0 &&
     product.current_stock <= product.min_stock &&
-    a.totalOutMovements > 0
+    (a.totalOutMovements > 0 || a.salesOrderLines > 0)
   ) {
     return true;
   }
@@ -198,24 +317,36 @@ function buildRationale(
   product: Pick<Product, 'current_stock' | 'min_stock'>
 ): string {
   if (bucket === 'order_now') {
+    if (a.timelineOutMovements > 0 && a.salesOrderLines > 0) {
+      return 'Out of stock with stock-outs and customer order demand — replenish urgently.';
+    }
+    if (a.salesOrderLines > 0 && a.timelineOutMovements === 0) {
+      return 'Out of stock but customer orders show demand — replenish (post stock-outs to match inventory).';
+    }
     return 'Out of stock with stock-outs across the timeline — replenish urgently.';
   }
   if (bucket === 'prioritize_reorder') {
-    if (a.timelineOutMovements > 0) {
-      return 'Sales outs recorded in the timeline — plan a purchase order before you run out.';
+    if (a.timelineOutMovements === 0 && a.salesOrderLines > 0) {
+      return 'Demand from sales orders — plan a purchase order before you run out.';
+    }
+    if (effectiveDemandLines(a) > 0) {
+      return 'Sales outs and/or orders in the timeline — plan a purchase order before you run out.';
     }
     if (a.totalMovementsAll >= 4) {
       return 'High stock movement (in/out) overall — keep an eye on levels.';
     }
-    if (product.current_stock <= product.min_stock && a.totalOutMovements > 0) {
-      return 'Below minimum with past sales — consider reordering.';
+    if (
+      product.current_stock <= product.min_stock &&
+      (a.totalOutMovements > 0 || a.salesOrderLines > 0)
+    ) {
+      return 'Below minimum with past sales or orders — consider reordering.';
     }
     return 'Eligible for planned reorder.';
   }
-  if (a.totalMovementsAll === 0) {
-    return 'At zero with no movement history — confirm the SKU is active before ordering.';
+  if (a.totalMovementsAll === 0 && a.salesOrderLines === 0) {
+    return 'At zero with no stock movement or sales order history — confirm the SKU is active before ordering.';
   }
-  return 'At zero with no stock-outs in the timeline — do not auto-order; check transfers, adjustments, or demand.';
+  return 'At zero with no demand from stock-outs or sales orders — do not auto-order; check listings and demand.';
 }
 
 /**
@@ -234,14 +365,14 @@ export const buildReorderPlan = <
   movements: Array<
     Pick<StockMovement, 'product_id' | 'movement_type' | 'quantity' | 'performed_at'>
   >,
-  options?: { limitPerBucket?: number }
+  options?: { limitPerBucket?: number; orders?: OrderForDemand[] }
 ): {
   orderNow: ReorderEngineRow<P>[];
   prioritizeReorder: ReorderEngineRow<P>[];
   reviewBeforeOrder: ReorderEngineRow<P>[];
 } => {
   const limit = options?.limitPerBucket ?? 8;
-  const analyticsMap = computeProductMovementAnalytics(movements);
+  const analyticsMap = computeProductDemandAnalytics(movements, options?.orders);
 
   const orderNow: ReorderEngineRow<P>[] = [];
   const prioritizeReorder: ReorderEngineRow<P>[] = [];
@@ -251,8 +382,9 @@ export const buildReorderPlan = <
     const a = analyticsMap.get(product.id) ?? emptyMovementAnalytics(product.id);
     const oos = product.current_stock <= 0;
     const suggestedOrderQty = getSuggestedOrderQuantity(product);
+    const hasDemand = effectiveDemandLines(a) > 0;
 
-    if (oos && a.timelineOutMovements > 0) {
+    if (oos && hasDemand) {
       orderNow.push({
         product,
         analytics: a,
@@ -261,7 +393,7 @@ export const buildReorderPlan = <
         rationale: buildRationale('order_now', a, product),
         suggestedOrderQty
       });
-    } else if (oos && a.timelineOutMovements === 0) {
+    } else if (oos && !hasDemand) {
       reviewBeforeOrder.push({
         product,
         analytics: a,
@@ -307,23 +439,24 @@ export const getRecommendedProductsByOutgoing = <
   movements: Array<
     Pick<StockMovement, 'product_id' | 'movement_type' | 'quantity' | 'performed_at'>
   >,
-  limit = 5
+  limit = 5,
+  orders?: OrderForDemand[]
 ): Array<{ product: P; stats: ProductMovementAnalytics }> => {
-  const velocity = computeProductMovementAnalytics(movements);
+  const velocity = computeProductDemandAnalytics(movements, orders);
 
   return [...products]
     .map((product) => {
       const stats = velocity.get(product.id) ?? emptyMovementAnalytics(product.id);
       return { product, stats };
     })
-    .filter(({ stats }) => stats.totalOutMovements > 0)
+    .filter(({ stats }) => effectiveDemandLines(stats) > 0)
     .filter(({ product }) => product.current_stock > 0)
     .sort((a, b) => {
-      if (b.stats.timelineOutMovements !== a.stats.timelineOutMovements) {
-        return b.stats.timelineOutMovements - a.stats.timelineOutMovements;
+      if (effectiveDemandLines(b.stats) !== effectiveDemandLines(a.stats)) {
+        return effectiveDemandLines(b.stats) - effectiveDemandLines(a.stats);
       }
-      if (b.stats.timelineOutQty !== a.stats.timelineOutQty) {
-        return b.stats.timelineOutQty - a.stats.timelineOutQty;
+      if (effectiveDemandQty(b.stats) !== effectiveDemandQty(a.stats)) {
+        return effectiveDemandQty(b.stats) - effectiveDemandQty(a.stats);
       }
       return b.stats.totalOutMovements - a.stats.totalOutMovements;
     })
@@ -337,11 +470,33 @@ export const getStockStatus = (product: Product) => {
   return 'ok';
 };
 
-export const formatCurrency = (amount: number) => {
+/**
+ * Parse money values from DB/API (number, string with commas, numeric strings). Never returns NaN.
+ */
+export function toMoneyNumber(value: unknown, fallback = 0): number {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : fallback;
+  }
+  if (typeof value === 'bigint') {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  if (typeof value === 'string') {
+    const cleaned = value.trim().replace(/,/g, '').replace(/^TSh\s*/i, '');
+    if (cleaned === '' || cleaned === '-') return fallback;
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  return fallback;
+}
+
+export const formatCurrency = (amount: number | unknown) => {
+  const n = toMoneyNumber(amount, 0);
   return new Intl.NumberFormat('en-TZ', {
     style: 'currency',
     currency: 'TZS'
-  }).format(amount);
+  }).format(n);
 };
 
 export const formatDate = (date: string | Date) => {

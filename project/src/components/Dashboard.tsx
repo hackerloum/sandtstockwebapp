@@ -4,16 +4,17 @@ import {
   ShoppingCart, Clock, BarChart2, Plus, FileText, RefreshCcw, Zap,
   TrendingUp, Ban
 } from 'lucide-react';
-import { Product, StockMovement } from '../types';
+import { Order, Product, StockMovement } from '../types';
 import {
   getStockStatus,
   formatCurrency,
   formatDate,
   calculateReorderQuantity,
   buildReorderPlan,
-  formatOutTimelineSummary
+  formatOutTimelineSummary,
+  formatSalesOrderTimelineSummary
 } from '../utils/stockUtils';
-import { getProducts, getStockMovements } from '../lib/supabase';
+import { getProducts, getStockMovements, getOrders } from '../lib/supabase';
 
 interface DashboardProps {
   onCreatePurchaseOrder?: (productId: string) => void;
@@ -32,6 +33,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 }) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,12 +41,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [productsData, movementsData] = await Promise.all([
+        const [productsData, movementsData, ordersData] = await Promise.all([
           getProducts(),
-          getStockMovements()
+          getStockMovements(),
+          getOrders()
         ]);
         setProducts(productsData || []);
         setMovements(movementsData || []);
+        setOrders(Array.isArray(ordersData) ? ordersData : []);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch data');
       } finally {
@@ -85,8 +89,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }, [products, movements]);
 
   const reorderPlan = useMemo(
-    () => buildReorderPlan(products, movements, { limitPerBucket: 8 }),
-    [products, movements]
+    () => buildReorderPlan(products, movements, { limitPerBucket: 8, orders }),
+    [products, movements, orders]
   );
 
   const stats = [
@@ -211,8 +215,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 Reorder engine
               </h3>
               <p className="text-sm text-gray-500 mt-1">
-                Outbound demand is measured across the full timeline (today, yesterday, last 7 days, and older). Suggested
-                order quantity reaches the midpoint between min and max stock for that SKU.
+                Demand combines <strong className="font-medium text-gray-700">stock-outs</strong> and{' '}
+                <strong className="font-medium text-gray-700">customer orders</strong> (by order date) across the same
+                timeline. Use this when stock movements are incomplete. Suggested order quantity targets the midpoint
+                between min and max stock.
               </p>
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -223,7 +229,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <h4 className="font-semibold text-emerald-900">Order now</h4>
                 </div>
                 <p className="text-xs text-emerald-800/80 mb-3">
-                  Out of stock but stock-outs appear somewhere on the timeline — demand is visible.
+                  Out of stock with demand from stock-outs and/or sales orders on the timeline.
                 </p>
                 {reorderPlan.orderNow.length === 0 ? (
                   <p className="text-sm text-gray-500">None right now.</p>
@@ -235,8 +241,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         className="rounded-lg bg-white border border-emerald-100 p-3 text-sm"
                       >
                         <p className="font-medium text-gray-900">{row.product.commercial_name}</p>
-                        <p className="text-gray-600 mt-1">
-                          Out timeline: {formatOutTimelineSummary(row.analytics.timelineBreakdown)}
+                        <p className="text-xs text-gray-600 mt-1">
+                          Stock-outs: {formatOutTimelineSummary(row.analytics.timelineBreakdown)}
+                        </p>
+                        <p className="text-xs text-gray-600 mt-1">
+                          Sales orders: {formatSalesOrderTimelineSummary(row.analytics.salesOrderTimelineBreakdown)}
                         </p>
                         <p className="text-sm font-medium text-emerald-900 mt-2">
                           Suggested order: {row.suggestedOrderQty} units
@@ -280,7 +289,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           Stock {row.product.current_stock} · Movements (all time) {row.analytics.totalMovementsAll}
                         </p>
                         <p className="text-xs text-gray-600 mt-1">
-                          Out: {formatOutTimelineSummary(row.analytics.timelineBreakdown)}
+                          Stock-outs: {formatOutTimelineSummary(row.analytics.timelineBreakdown)}
+                        </p>
+                        <p className="text-xs text-gray-600 mt-1">
+                          Sales orders: {formatSalesOrderTimelineSummary(row.analytics.salesOrderTimelineBreakdown)}
                         </p>
                         <p className="text-sm font-medium text-amber-950 mt-2">
                           Suggested order: {row.suggestedOrderQty} units
@@ -308,7 +320,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <h4 className="font-semibold text-slate-900">Do not auto-order</h4>
                 </div>
                 <p className="text-xs text-slate-600 mb-3">
-                  At zero stock with no stock-outs on the outbound timeline — review before buying.
+                  At zero with no stock-outs and no customer order lines on the timeline — review before buying.
                 </p>
                 {reorderPlan.reviewBeforeOrder.length === 0 ? (
                   <p className="text-sm text-gray-500">None right now.</p>
@@ -324,7 +336,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           Stock 0 · Movements (all time) {row.analytics.totalMovementsAll}
                         </p>
                         <p className="text-xs text-gray-600 mt-1">
-                          Out: {formatOutTimelineSummary(row.analytics.timelineBreakdown)}
+                          Stock-outs: {formatOutTimelineSummary(row.analytics.timelineBreakdown)}
+                        </p>
+                        <p className="text-xs text-gray-600 mt-1">
+                          Sales orders: {formatSalesOrderTimelineSummary(row.analytics.salesOrderTimelineBreakdown)}
                         </p>
                         <p className="text-sm text-slate-700 mt-2">
                           Reference qty (if you restock): {row.suggestedOrderQty} units
