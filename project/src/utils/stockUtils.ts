@@ -679,6 +679,47 @@ function embeddedProductLine(raw: Record<string, unknown>): { name: string; code
 }
 
 /**
+ * When every line has no amounts stored but the order header has a total (imports / legacy rows),
+ * split the header total across lines by quantity for display and PDFs.
+ */
+function inferLineAmountsFromOrderTotal(lines: ResolvedOrderLine[], orderTotal: number): ResolvedOrderLine[] {
+  const total = toMoneyNumber(orderTotal, 0);
+  if (total <= 0 || lines.length === 0) return lines;
+
+  const sumLines = lines.reduce((s, l) => s + Math.max(0, l.total_price), 0);
+  if (sumLines >= 0.01) return lines;
+
+  const positiveIdx = lines
+    .map((l, i) => ({ l, i }))
+    .filter(({ l }) => l.quantity > 0);
+  const sumQty = positiveIdx.reduce((s, { l }) => s + l.quantity, 0);
+  if (sumQty <= 0) return lines;
+
+  const totalCents = Math.round(total * 100);
+  let allocatedCents = 0;
+  const centsByIndex = new Map<number, number>();
+
+  positiveIdx.forEach(({ l, i }, j) => {
+    const q = l.quantity;
+    const isLast = j === positiveIdx.length - 1;
+    const c = isLast ? Math.max(0, totalCents - allocatedCents) : Math.floor((totalCents * q) / sumQty);
+    if (!isLast) allocatedCents += c;
+    centsByIndex.set(i, c);
+  });
+
+  return lines.map((l, i) => {
+    const q = Math.max(0, l.quantity);
+    if (q === 0) {
+      return { ...l, unit_price: 0, total_price: 0 };
+    }
+    const c = centsByIndex.get(i) ?? 0;
+    const total_price = c / 100;
+    const unit_price = Math.round((total_price / q) * 100) / 100;
+    return { ...l, unit_price, total_price };
+  });
+}
+
+/**
  * Normalize order line items for display: prefer live product names from `products`,
  * fall back to embedded product join / stored labels, and accept camelCase or alternate price keys.
  */
@@ -690,7 +731,7 @@ export function resolveOrderItemsForDisplay(order: Order, products: Product[]): 
     byId.set(p.id.toLowerCase(), p);
   }
 
-  return raw.map((item, index) => {
+  const lines = raw.map((item, index) => {
     const r = item as OrderItem &
       Record<string, unknown> & {
         productId?: string;
@@ -749,4 +790,6 @@ export function resolveOrderItemsForDisplay(order: Order, products: Product[]): 
       total_price
     };
   });
+
+  return inferLineAmountsFromOrderTotal(lines, toMoneyNumber(order.total_amount, 0));
 }
