@@ -72,6 +72,48 @@ export const effectiveDemandLines = (a: ProductMovementAnalytics): number =>
 export const effectiveDemandQty = (a: ProductMovementAnalytics): number =>
   a.timelineOutQty + a.salesOrderQty;
 
+/** Demand units in the recent window (today + yesterday + last 7d): stock-outs + sales orders. */
+export const recentWindowDemandQty = (a: ProductMovementAnalytics): number => {
+  const b = a.timelineBreakdown;
+  const o = a.salesOrderTimelineBreakdown;
+  return (
+    b.today.qty +
+    b.yesterday.qty +
+    b.last_week.qty +
+    o.today.qty +
+    o.yesterday.qty +
+    o.last_week.qty
+  );
+};
+
+/** Demand line/movement count in the recent window (stock-out rows + order lines). */
+export const recentWindowDemandLines = (a: ProductMovementAnalytics): number => {
+  const b = a.timelineBreakdown;
+  const o = a.salesOrderTimelineBreakdown;
+  return (
+    b.today.movements +
+    b.yesterday.movements +
+    b.last_week.movements +
+    o.today.movements +
+    o.yesterday.movements +
+    o.last_week.movements
+  );
+};
+
+/** Max units suggested in one reorder line item (also capped by shelf headroom). */
+export const MAX_SUGGESTED_REORDER_UNITS = 100;
+
+export type DemandPriorityTier = 'critical' | 'high' | 'standard';
+
+export const getOrderNowDemandTier = (a: ProductMovementAnalytics): DemandPriorityTier => {
+  const rq = recentWindowDemandQty(a);
+  const rl = recentWindowDemandLines(a);
+  const dAll = effectiveDemandQty(a);
+  if (rq >= 35 || rl >= 12 || (dAll >= 60 && rq >= 15)) return 'critical';
+  if (rq >= 12 || rl >= 5 || dAll >= 25) return 'high';
+  return 'standard';
+};
+
 /** Compact label for outbound counts per timeline bucket (all buckets). */
 export const formatOutTimelineSummary = (
   b: ProductMovementAnalytics['timelineBreakdown']
@@ -259,18 +301,33 @@ export type ReorderEngineRow<
   /** When false, avoid placing a blind purchase order without human review */
   suggestPurchaseOrder: boolean;
   rationale: string;
-  /** Units to order toward mid-point between min and max stock (same as calculateReorderQuantity). */
+  /** Units to order: demand-aware, capped (see {@link getDemandAwareSuggestedOrderQty}). */
   suggestedOrderQty: number;
+  /** Set for {@link ReorderBucket.order_now} — recent timeline + total demand. */
+  demandPriority?: DemandPriorityTier;
 };
 
-const sortOrderNow = (
-  a: { analytics: ProductMovementAnalytics },
-  b: { analytics: ProductMovementAnalytics }
+const sortOrderNow = <
+  P extends {
+    commercial_name: string;
+  }
+>(
+  a: { product: P; analytics: ProductMovementAnalytics },
+  b: { product: P; analytics: ProductMovementAnalytics }
 ) => {
+  const rwA = recentWindowDemandQty(a.analytics);
+  const rwB = recentWindowDemandQty(b.analytics);
+  if (rwB !== rwA) return rwB - rwA;
+  const rlA = recentWindowDemandLines(a.analytics);
+  const rlB = recentWindowDemandLines(b.analytics);
+  if (rlB !== rlA) return rlB - rlA;
   if (effectiveDemandQty(b.analytics) !== effectiveDemandQty(a.analytics)) {
     return effectiveDemandQty(b.analytics) - effectiveDemandQty(a.analytics);
   }
-  return effectiveDemandLines(b.analytics) - effectiveDemandLines(a.analytics);
+  if (effectiveDemandLines(b.analytics) !== effectiveDemandLines(a.analytics)) {
+    return effectiveDemandLines(b.analytics) - effectiveDemandLines(a.analytics);
+  }
+  return a.product.commercial_name.localeCompare(b.product.commercial_name);
 };
 
 const sortPrioritize = (
@@ -283,6 +340,9 @@ const sortPrioritize = (
   if (effectiveDemandQty(b.analytics) !== effectiveDemandQty(a.analytics)) {
     return effectiveDemandQty(b.analytics) - effectiveDemandQty(a.analytics);
   }
+  const rwB = recentWindowDemandQty(b.analytics);
+  const rwA = recentWindowDemandQty(a.analytics);
+  if (rwB !== rwA) return rwB - rwA;
   return b.analytics.totalMovementsAll - a.analytics.totalMovementsAll;
 };
 
@@ -292,6 +352,34 @@ export const getSuggestedOrderQuantity = (
 ): number => {
   const targetStock = Math.ceil((product.max_stock + product.min_stock) / 2);
   return Math.max(0, targetStock - product.current_stock);
+};
+
+/**
+ * Suggested PO quantity: at least midpoint restock, scaled up when demand is strong, capped at
+ * {@link MAX_SUGGESTED_REORDER_UNITS} and by remaining capacity to {@link Product.max_stock}.
+ */
+export const getDemandAwareSuggestedOrderQty = (
+  product: Pick<Product, 'current_stock' | 'min_stock' | 'max_stock'>,
+  analytics: ProductMovementAnalytics
+): number => {
+  const baseline = getSuggestedOrderQuantity(product);
+  const headroom = Math.max(0, product.max_stock - product.current_stock);
+  const cap = Math.min(MAX_SUGGESTED_REORDER_UNITS, headroom);
+  if (cap === 0) return 0;
+
+  const dAll = effectiveDemandQty(analytics);
+  const dRecent = recentWindowDemandQty(analytics);
+  const dLines = effectiveDemandLines(analytics);
+
+  if (dAll >= 80 || dRecent >= 45 || (dAll >= 50 && dRecent >= 25)) {
+    return Math.max(baseline, cap);
+  }
+
+  const boosted = Math.max(
+    baseline,
+    Math.ceil(dAll * 0.5 + dRecent * 0.25 + Math.min(dLines, 40) * 1.2)
+  );
+  return Math.min(cap, Math.max(baseline, boosted));
 };
 
 function shouldPrioritizeReorder(
@@ -317,6 +405,32 @@ function buildRationale(
   product: Pick<Product, 'current_stock' | 'min_stock'>
 ): string {
   if (bucket === 'order_now') {
+    const tier = getOrderNowDemandTier(a);
+    const rq = recentWindowDemandQty(a);
+    const rl = recentWindowDemandLines(a);
+    const recentHint =
+      rq > 0 || rl > 0
+        ? ` Recent window (today + last 7d): ~${rq} demand units, ${rl} demand lines.`
+        : '';
+
+    if (tier === 'critical') {
+      if (a.timelineOutMovements > 0 && a.salesOrderLines > 0) {
+        return `Critical priority — very high recent demand on the timeline.${recentHint} Out of stock with stock-outs and customer orders — replenish immediately.`;
+      }
+      if (a.salesOrderLines > 0 && a.timelineOutMovements === 0) {
+        return `Critical priority — strong order activity.${recentHint} Out of stock; orders show demand — replenish (align stock-outs when possible).`;
+      }
+      return `Critical priority — very high recent movement vs timeline.${recentHint} Out of stock with stock-outs — replenish immediately.`;
+    }
+    if (tier === 'high') {
+      if (a.timelineOutMovements > 0 && a.salesOrderLines > 0) {
+        return `High priority — strong recent demand.${recentHint} Out of stock with stock-outs and customer orders — replenish urgently.`;
+      }
+      if (a.salesOrderLines > 0 && a.timelineOutMovements === 0) {
+        return `High priority — orders show sustained demand.${recentHint} Out of stock; replenish (post stock-outs to match inventory).`;
+      }
+      return `High priority — notable recent activity.${recentHint} Out of stock with stock-outs — replenish urgently.`;
+    }
     if (a.timelineOutMovements > 0 && a.salesOrderLines > 0) {
       return 'Out of stock with stock-outs and customer order demand — replenish urgently.';
     }
@@ -388,19 +502,21 @@ export const buildReorderPlan = <
   for (const product of products) {
     const a = analyticsMap.get(product.id) ?? emptyMovementAnalytics(product.id);
     const oos = product.current_stock <= 0;
-    const suggestedOrderQty = getSuggestedOrderQuantity(product);
     const hasDemand = effectiveDemandLines(a) > 0;
 
     if (oos && hasDemand) {
+      const suggestedOrderQty = getDemandAwareSuggestedOrderQty(product, a);
       orderNow.push({
         product,
         analytics: a,
         bucket: 'order_now',
         suggestPurchaseOrder: true,
         rationale: buildRationale('order_now', a, product),
-        suggestedOrderQty
+        suggestedOrderQty,
+        demandPriority: getOrderNowDemandTier(a)
       });
     } else if (oos && !hasDemand) {
+      const suggestedOrderQty = getSuggestedOrderQuantity(product);
       reviewBeforeOrder.push({
         product,
         analytics: a,
@@ -410,6 +526,7 @@ export const buildReorderPlan = <
         suggestedOrderQty
       });
     } else if (!oos && shouldPrioritizeReorder(product, a)) {
+      const suggestedOrderQty = getDemandAwareSuggestedOrderQty(product, a);
       prioritizeReorder.push({
         product,
         analytics: a,

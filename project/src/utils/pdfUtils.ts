@@ -1,7 +1,16 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Order, Product } from '../types';
-import { formatCurrency, formatDate, resolveOrderGrandTotal, resolveOrderItemsForDisplay } from './stockUtils';
+import {
+  formatCurrency,
+  formatDate,
+  resolveOrderGrandTotal,
+  resolveOrderItemsForDisplay,
+  effectiveDemandQty,
+  recentWindowDemandQty,
+  MAX_SUGGESTED_REORDER_UNITS,
+  type ReorderEngineRow
+} from './stockUtils';
 
 export const generateOrderPDF = (order: Order, products: Product[]) => {
   // Create A4 document (210mm x 297mm)
@@ -365,4 +374,136 @@ const getOrderTypeLabel = (type: string) => {
     default:
       return type || 'Unknown';
   }
-}; 
+};
+
+export type ReorderSectionPdfSlug = 'order-now' | 'plan-reorder' | 'do-not-order';
+
+function truncateReorderRationale(text: string, max = 120): string {
+  const t = text.replace(/\s+/g, ' ').trim();
+  return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
+}
+
+/**
+ * Downloads a PDF listing one reorder-engine section (Order now, Plan reorder, or Do not auto-order).
+ */
+export function downloadReorderSectionPdf<
+  P extends {
+    code: string;
+    commercial_name: string;
+    current_stock: number;
+    min_stock: number;
+    max_stock: number;
+  }
+>(slug: ReorderSectionPdfSlug, sectionTitle: string, rows: ReorderEngineRow<P>[]): void {
+  if (rows.length === 0) return;
+
+  const doc = new jsPDF('l', 'mm', 'a4');
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 12;
+  let y = 14;
+
+  doc.setProperties({
+    title: `${sectionTitle} — Reorder list`,
+    subject: 'Reorder engine export',
+    author: 'Argeville Stock Tracker'
+  });
+
+  doc.setFillColor(66, 139, 202);
+  doc.rect(0, 0, pageWidth, 24, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(15);
+  doc.setFont('helvetica', 'bold');
+  doc.text('ARGEVILLE — Stock Tracker', pageWidth / 2, 11, { align: 'center' });
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text(sectionTitle, pageWidth / 2, 19, { align: 'center' });
+
+  doc.setTextColor(0, 0, 0);
+  y = 32;
+  doc.setFontSize(8);
+  doc.text(
+    `Generated ${formatDate(new Date())} · ${rows.length} line(s) · Demand units = stock-outs + sales orders · Recent = today+yesterday+last 7d · Suggested cap ${MAX_SUGGESTED_REORDER_UNITS} u per SKU (and max stock headroom)`,
+    margin,
+    y
+  );
+  y += 6;
+
+  const showPriority = slug === 'order-now';
+
+  const head = showPriority
+    ? [['#', 'Priority', 'Product', 'Code', 'Stock', 'Demand (u)', 'Recent (u)', 'Suggested', 'Rationale']]
+    : [['#', 'Product', 'Code', 'Stock', 'Demand (u)', 'Recent (u)', 'Suggested', 'Rationale']];
+
+  const body = rows.map((row, idx) => {
+    const p = row.product;
+    const a = row.analytics;
+    const shortRat = truncateReorderRationale(row.rationale);
+    const pr = row.demandPriority
+      ? row.demandPriority === 'critical'
+        ? 'Critical'
+        : row.demandPriority === 'high'
+          ? 'High'
+          : 'Standard'
+      : '—';
+    if (showPriority) {
+      return [
+        String(idx + 1),
+        pr,
+        p.commercial_name,
+        p.code,
+        String(p.current_stock),
+        String(effectiveDemandQty(a)),
+        String(recentWindowDemandQty(a)),
+        String(row.suggestedOrderQty),
+        shortRat
+      ];
+    }
+    return [
+      String(idx + 1),
+      p.commercial_name,
+      p.code,
+      String(p.current_stock),
+      String(effectiveDemandQty(a)),
+      String(recentWindowDemandQty(a)),
+      String(row.suggestedOrderQty),
+      shortRat
+    ];
+  });
+
+  autoTable(doc, {
+    startY: y,
+    head,
+    body,
+    theme: 'grid',
+    headStyles: { fillColor: [66, 139, 202], textColor: 255, fontSize: 8, fontStyle: 'bold' },
+    bodyStyles: { fontSize: 7 },
+    margin: { left: margin, right: margin },
+    styles: { cellPadding: 1.5, overflow: 'linebreak' },
+    columnStyles: showPriority
+      ? {
+          0: { cellWidth: 10, halign: 'center' },
+          1: { cellWidth: 18 },
+          2: { cellWidth: 42 },
+          3: { cellWidth: 22 },
+          4: { cellWidth: 14, halign: 'right' },
+          5: { cellWidth: 18, halign: 'right' },
+          6: { cellWidth: 18, halign: 'right' },
+          7: { cellWidth: 16, halign: 'right' },
+          8: { cellWidth: 72 }
+        }
+      : {
+          0: { cellWidth: 10, halign: 'center' },
+          1: { cellWidth: 48 },
+          2: { cellWidth: 24 },
+          3: { cellWidth: 16, halign: 'right' },
+          4: { cellWidth: 20, halign: 'right' },
+          5: { cellWidth: 20, halign: 'right' },
+          6: { cellWidth: 18, halign: 'right' },
+          7: { cellWidth: 88 }
+        }
+  });
+
+  const safeSlug = slug.replace(/[^a-z0-9-]+/gi, '-');
+  const stamp = new Date().toISOString().slice(0, 10);
+  doc.save(`reorder-${safeSlug}-${stamp}.pdf`);
+} 
