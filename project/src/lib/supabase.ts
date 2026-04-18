@@ -1,10 +1,45 @@
 import { createClient } from '@supabase/supabase-js';
 import { Database } from '../types/supabase';
+import { toMoneyNumber } from '../utils/stockUtils';
 
 const supabaseUrl = 'https://ljkvwaduqvacmrvycshj.supabase.co';
 const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxqa3Z3YWR1cXZhY21ydnljc2hqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MTE3MTgsImV4cCI6MjA2OTQ4NzcxOH0.fkbZbCF8KTK5aupvRRu6dCycIgB9N4BnnxZNZd3cz4Q';
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+
+/** Map joined order_items + product embed into app OrderItem (coerce decimals, name from join). */
+function mapOrderItemRowFromQuery(item: Record<string, unknown>) {
+  const embedded = item.product as Record<string, unknown> | Record<string, unknown>[] | null | undefined;
+  const embeddedRow = Array.isArray(embedded) ? embedded[0] : embedded;
+  const nameFromJoin = embeddedRow
+    ? (() => {
+        const cn = String(embeddedRow.commercial_name ?? '').trim();
+        const nm = String(embeddedRow.name ?? '').trim();
+        const code = embeddedRow.code != null ? String(embeddedRow.code).trim() : '';
+        return cn || nm || (code ? code : '');
+      })()
+    : '';
+
+  const qty = Math.max(0, Math.floor(toMoneyNumber(item.quantity, 0)));
+  let unit_price = toMoneyNumber(item.unit_price, 0);
+  let total_price = toMoneyNumber(item.total_price, 0);
+
+  if (unit_price === 0 && total_price > 0 && qty > 0) {
+    unit_price = Math.round((total_price / qty) * 100) / 100;
+  }
+  if (total_price === 0 && unit_price > 0 && qty > 0) {
+    total_price = Math.round(qty * unit_price * 100) / 100;
+  }
+
+  return {
+    id: item.id as string,
+    product_id: item.product_id as string,
+    product_name: nameFromJoin || 'Unknown Product',
+    quantity: qty,
+    unit_price,
+    total_price
+  };
+}
 
 // Helper functions for data access
 export const getProducts = async () => {
@@ -453,14 +488,7 @@ export const getOrders = async () => {
           pickup_by_staff: (order as any).pickup_by_staff || false,
           pickup_person_name: (order as any).pickup_person_name || null,
           pickup_person_phone: (order as any).pickup_person_phone || null,
-          items: order.items?.map((item: any) => ({
-            id: item.id,
-            product_id: item.product_id,
-            product_name: item.product?.commercial_name || 'Unknown Product',
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-            total_price: item.total_price
-          })) || []
+          items: order.items?.map((item: Record<string, unknown>) => mapOrderItemRowFromQuery(item)) || []
         })) || [];
         
       } catch (serviceErr) {
@@ -512,14 +540,7 @@ export const getOrders = async () => {
             pickup_by_staff: (order as any).pickup_by_staff || false,
             pickup_person_name: (order as any).pickup_person_name || null,
             pickup_person_phone: (order as any).pickup_person_phone || null,
-            items: order.items?.map((item: any) => ({
-              id: item.id,
-              product_id: item.product_id,
-              product_name: item.product?.commercial_name || 'Unknown Product',
-              quantity: item.quantity,
-              unit_price: item.unit_price,
-              total_price: item.total_price
-            })) || []
+            items: order.items?.map((item: Record<string, unknown>) => mapOrderItemRowFromQuery(item)) || []
           }));
         }
       } catch (serviceErr) {
@@ -571,14 +592,7 @@ export const getOrders = async () => {
       pickup_by_staff: (order as any).pickup_by_staff || false,
       pickup_person_name: (order as any).pickup_person_name || null,
       pickup_person_phone: (order as any).pickup_person_phone || null,
-      items: order.items?.map((item: any) => ({
-        id: item.id,
-        product_id: item.product_id,
-        product_name: item.product?.commercial_name || 'Unknown Product',
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        total_price: item.total_price
-      })) || []
+      items: order.items?.map((item: Record<string, unknown>) => mapOrderItemRowFromQuery(item)) || []
     })) || [];
     
   } catch (err) {

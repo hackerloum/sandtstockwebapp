@@ -659,33 +659,84 @@ export type ResolvedOrderLine = {
   total_price: number;
 };
 
+function pickMoneyField(obj: Record<string, unknown>, keys: string[], fallback = 0): number {
+  for (const k of keys) {
+    if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
+    const n = toMoneyNumber(obj[k], NaN);
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
+}
+
+function embeddedProductLine(raw: Record<string, unknown>): { name: string; code: string } {
+  let p = raw.product;
+  if (Array.isArray(p)) p = p[0];
+  if (!p || typeof p !== 'object') return { name: '', code: '' };
+  const o = p as Record<string, unknown>;
+  const name = String(o.commercial_name ?? o.name ?? '').trim();
+  const code = String(o.code ?? '').trim();
+  return { name, code };
+}
+
 /**
  * Normalize order line items for display: prefer live product names from `products`,
- * fall back to stored line labels, and accept occasional camelCase payloads.
+ * fall back to embedded product join / stored labels, and accept camelCase or alternate price keys.
  */
 export function resolveOrderItemsForDisplay(order: Order, products: Product[]): ResolvedOrderLine[] {
   const raw = order.items ?? [];
-  const byId = new Map(products.map((p) => [p.id, p]));
+  const byId = new Map<string, Product>();
+  for (const p of products) {
+    byId.set(p.id, p);
+    byId.set(p.id.toLowerCase(), p);
+  }
 
   return raw.map((item, index) => {
-    const r = item as OrderItem & {
-      productId?: string;
-      productName?: string;
-      unitPrice?: number;
-      totalPrice?: number;
-    };
-    const product_id = (r.product_id || r.productId || '').trim();
-    const fromCatalog = product_id ? byId.get(product_id) : undefined;
-    const nameFromLine = (r.product_name || r.productName || '').trim();
-    const product_name =
-      fromCatalog?.commercial_name ||
-      nameFromLine ||
-      (product_id ? `Product (${product_id.slice(0, 8)}…)` : 'Unknown product');
+    const r = item as OrderItem &
+      Record<string, unknown> & {
+        productId?: string;
+        productName?: string;
+        unitPrice?: number;
+        totalPrice?: number;
+        price?: number;
+      };
 
-    const quantity = Number(r.quantity) || 0;
-    const unit_price = Number(r.unit_price ?? r.unitPrice) || 0;
-    let total_price = Number(r.total_price ?? r.totalPrice) || 0;
-    if (total_price === 0 && quantity > 0 && unit_price > 0) {
+    const row = r as Record<string, unknown>;
+    const product_id = String(r.product_id || r.productId || '').trim();
+    const fromCatalog = product_id
+      ? byId.get(product_id) ?? byId.get(product_id.toLowerCase())
+      : undefined;
+    const embedded = embeddedProductLine(row);
+
+    const nameFromLine = String(r.product_name ?? r.productName ?? '').trim();
+    const product_name = (
+      fromCatalog?.commercial_name?.trim() ||
+      embedded.name ||
+      nameFromLine ||
+      (embedded.code ? embedded.code : '') ||
+      (fromCatalog?.code?.trim() ? fromCatalog.code : '') ||
+      (product_id ? `Product (${product_id.slice(0, 8)}…)` : 'Unknown product')
+    ).trim() || 'Unknown product';
+
+    const quantity = Math.max(
+      0,
+      Math.floor(pickMoneyField(row, ['quantity', 'qty', 'Quantity'], 0))
+    );
+
+    let unit_price = pickMoneyField(
+      row,
+      ['unit_price', 'unitPrice', 'UnitPrice', 'price', 'unit_price_tz', 'unitPriceTz'],
+      0
+    );
+    let total_price = pickMoneyField(
+      row,
+      ['total_price', 'totalPrice', 'TotalPrice', 'line_total', 'subtotal', 'amount'],
+      0
+    );
+
+    if (unit_price === 0 && total_price > 0 && quantity > 0) {
+      unit_price = Math.round((total_price / quantity) * 100) / 100;
+    }
+    if (total_price === 0 && unit_price > 0 && quantity > 0) {
       total_price = Math.round(quantity * unit_price * 100) / 100;
     }
 
