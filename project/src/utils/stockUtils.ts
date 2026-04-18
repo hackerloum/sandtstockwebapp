@@ -666,13 +666,30 @@ export type ResolvedOrderLine = {
   total_price: number;
 };
 
-function pickMoneyField(obj: Record<string, unknown>, keys: string[], fallback = 0): number {
+/** Quantity: first non‑negative finite value (0 is valid). */
+function pickQuantityField(obj: Record<string, unknown>, keys: string[], fallback = 0): number {
   for (const k of keys) {
     if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
     const n = toMoneyNumber(obj[k], NaN);
-    if (Number.isFinite(n)) return n;
+    if (Number.isFinite(n) && n >= 0) return Math.floor(n);
   }
   return fallback;
+}
+
+/**
+ * Money on a line: prefer the first **strictly positive** value among keys so we do not lock onto
+ * `unit_price: 0` / `total_price: 0` when another field (e.g. `line_total`) holds the real amount.
+ */
+function pickLineMoney(obj: Record<string, unknown>, keys: string[], fallback = 0): number {
+  let lastFinite = fallback;
+  for (const k of keys) {
+    if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
+    const n = toMoneyNumber(obj[k], NaN);
+    if (!Number.isFinite(n)) continue;
+    if (n > 0) return n;
+    lastFinite = n;
+  }
+  return lastFinite;
 }
 
 function embeddedProductLine(raw: Record<string, unknown>): { name: string; code: string } {
@@ -689,11 +706,29 @@ function embeddedProductLine(raw: Record<string, unknown>): { name: string; code
  * When every line has no amounts stored but the order header has a total (imports / legacy rows),
  * split the header total across lines by quantity for display and PDFs.
  */
+/** Best effort header total (snake_case / camelCase / occasional API shapes). */
+export function resolveOrderGrandTotal(order: Order): number {
+  const o = order as unknown as Record<string, unknown>;
+  const candidates: unknown[] = [
+    o.total_amount,
+    o.totalAmount,
+    o['TotalAmount'],
+    o['total'],
+    o['grand_total'],
+    o['GrandTotal']
+  ];
+  for (const c of candidates) {
+    const n = toMoneyNumber(c, 0);
+    if (n > 0) return n;
+  }
+  return 0;
+}
+
 function inferLineAmountsFromOrderTotal(lines: ResolvedOrderLine[], orderTotal: number): ResolvedOrderLine[] {
   const total = toMoneyNumber(orderTotal, 0);
   if (total <= 0 || lines.length === 0) return lines;
 
-  const sumLines = lines.reduce((s, l) => s + Math.max(0, l.total_price), 0);
+  const sumLines = lines.reduce((s, l) => s + toMoneyNumber(l.total_price, 0), 0);
   if (sumLines >= 0.01) return lines;
 
   const positiveIdx = lines
@@ -765,27 +800,43 @@ export function resolveOrderItemsForDisplay(order: Order, products: Product[]): 
       (product_id ? `Product (${product_id.slice(0, 8)}…)` : 'Unknown product')
     ).trim() || 'Unknown product';
 
-    const quantity = Math.max(
-      0,
-      Math.floor(pickMoneyField(row, ['quantity', 'qty', 'Quantity'], 0))
-    );
+    const quantity = Math.max(0, pickQuantityField(row, ['quantity', 'qty', 'Quantity'], 0));
 
-    let unit_price = pickMoneyField(
-      row,
-      ['unit_price', 'unitPrice', 'UnitPrice', 'price', 'unit_price_tz', 'unitPriceTz'],
-      0
-    );
-    let total_price = pickMoneyField(
-      row,
-      ['total_price', 'totalPrice', 'TotalPrice', 'line_total', 'subtotal', 'amount'],
-      0
-    );
+    let unit_price = pickLineMoney(row, [
+      'unit_price',
+      'unitPrice',
+      'UnitPrice',
+      'sale_price',
+      'list_price',
+      'price',
+      'unit_price_tz',
+      'unitPriceTz'
+    ]);
+    let total_price = pickLineMoney(row, [
+      'total_price',
+      'totalPrice',
+      'TotalPrice',
+      'line_total',
+      'line_total_price',
+      'line_amount',
+      'extended_price',
+      'subtotal',
+      'amount'
+    ]);
 
     if (unit_price === 0 && total_price > 0 && quantity > 0) {
       unit_price = Math.round((total_price / quantity) * 100) / 100;
     }
     if (total_price === 0 && unit_price > 0 && quantity > 0) {
       total_price = Math.round(quantity * unit_price * 100) / 100;
+    }
+
+    if (unit_price === 0 && total_price === 0 && fromCatalog && quantity > 0) {
+      const list = toMoneyNumber(fromCatalog.price, 0);
+      if (list > 0) {
+        unit_price = list;
+        total_price = Math.round(quantity * list * 100) / 100;
+      }
     }
 
     return {
@@ -798,5 +849,5 @@ export function resolveOrderItemsForDisplay(order: Order, products: Product[]): 
     };
   });
 
-  return inferLineAmountsFromOrderTotal(lines, toMoneyNumber(order.total_amount, 0));
+  return inferLineAmountsFromOrderTotal(lines, resolveOrderGrandTotal(order));
 }

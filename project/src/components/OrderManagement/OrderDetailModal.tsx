@@ -1,7 +1,7 @@
 import React from 'react';
 import { Printer, Download, FileText, User, Phone, Mail, Calendar, Package, Info } from 'lucide-react';
 import { Order, Product } from '../../types';
-import { formatCurrency, formatDate, resolveOrderItemsForDisplay } from '../../utils/stockUtils';
+import { formatCurrency, formatDate, resolveOrderGrandTotal, resolveOrderItemsForDisplay } from '../../utils/stockUtils';
 import { printOrderPDF, printOrderPDFToWindow } from '../../utils/pdfUtils';
 import { Modal } from '../shared/Modal';
 import { Select } from '../shared/Form';
@@ -56,6 +56,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 
   const orderTypeInfo = getOrderTypeInfo(order.order_type);
   const displayItems = resolveOrderItemsForDisplay(order, products);
+  const orderGrandTotal = resolveOrderGrandTotal(order);
 
   return (
     <Modal
@@ -134,7 +135,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-700">Total Amount</p>
-                  <p className="text-lg font-bold text-green-600">{formatCurrency(order.total_amount)}</p>
+                  <p className="text-lg font-bold text-green-600">{formatCurrency(orderGrandTotal || order.total_amount)}</p>
                 </div>
               </div>
             </div>
@@ -225,7 +226,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 </div>
               ))}
               <div className="text-right pt-2 border-t border-gray-200">
-                <p className="text-xl font-bold">Total: {formatCurrency(order.total_amount)}</p>
+                <p className="text-xl font-bold">Total: {formatCurrency(orderGrandTotal || order.total_amount)}</p>
               </div>
             </div>
           ) : (

@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Order, Product } from '../types';
-import { formatCurrency, formatDate, resolveOrderItemsForDisplay } from './stockUtils';
+import { formatCurrency, formatDate, resolveOrderGrandTotal, resolveOrderItemsForDisplay } from './stockUtils';
 
 export const generateOrderPDF = (order: Order, products: Product[]) => {
   // Create A4 document (210mm x 297mm)
@@ -127,7 +127,11 @@ export const generateOrderPDF = (order: Order, products: Product[]) => {
   
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.text(`Total Amount: ${formatCurrency(order.total_amount)}`, margin + 5, currentY + 12);
+  doc.text(
+    `Total Amount: ${formatCurrency(resolveOrderGrandTotal(order) || order.total_amount)}`,
+    margin + 5,
+    currentY + 12
+  );
   
   currentY += 30;
 
@@ -306,7 +310,11 @@ export const generateBulkOrdersPDF = (orders: Order[], products: Product[]) => {
     
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Customer: ${order.customer_name} | Date: ${formatDate(order.created_at)} | Total: ${formatCurrency(order.total_amount)}`, margin, currentY);
+    doc.text(
+      `Customer: ${order.customer_name} | Date: ${formatDate(order.created_at)} | Total: ${formatCurrency(resolveOrderGrandTotal(order) || order.total_amount)}`,
+      margin,
+      currentY
+    );
     currentY += 15;
     
     // Add order items summary
