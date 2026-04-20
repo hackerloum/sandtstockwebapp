@@ -56,6 +56,18 @@ export const UpcomingInvoicesPage: React.FC<UpcomingInvoicesPageProps> = ({ prod
   const [info, setInfo] = useState<string | null>(null);
   const [manualRawText, setManualRawText] = useState('');
 
+  const toErrorMessage = (err: unknown, fallback: string) => {
+    if (err instanceof Error && err.message) return err.message;
+    if (err && typeof err === 'object') {
+      const anyErr = err as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+      const pieces = [anyErr.message, anyErr.details, anyErr.hint, anyErr.code]
+        .filter((x) => typeof x === 'string' && String(x).trim().length > 0)
+        .map((x) => String(x));
+      if (pieces.length > 0) return pieces.join(' — ');
+    }
+    return fallback;
+  };
+
   const loadInvoices = async () => {
     setLoadingInvoices(true);
     setError(null);
@@ -63,7 +75,7 @@ export const UpcomingInvoicesPage: React.FC<UpcomingInvoicesPageProps> = ({ prod
       const data = await getUpcomingInvoices();
       setExistingInvoices(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load upcoming invoices.');
+      setError(toErrorMessage(err, 'Failed to load upcoming invoices.'));
     } finally {
       setLoadingInvoices(false);
     }
@@ -92,7 +104,7 @@ export const UpcomingInvoicesPage: React.FC<UpcomingInvoicesPageProps> = ({ prod
       const parsed = await parseUpcomingInvoicePdf(file);
       applyDraft(parsed);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to parse PDF.');
+      setError(toErrorMessage(err, 'Failed to parse PDF.'));
     } finally {
       setParsing(false);
     }
@@ -154,7 +166,7 @@ export const UpcomingInvoicesPage: React.FC<UpcomingInvoicesPageProps> = ({ prod
       await loadInvoices();
       await onSaved?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save upcoming invoice.');
+      setError(toErrorMessage(err, 'Failed to save upcoming invoice.'));
     } finally {
       setSaving(false);
     }
