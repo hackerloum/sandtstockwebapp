@@ -370,16 +370,34 @@ export const getDemandAwareSuggestedOrderQty = (
   const dAll = effectiveDemandQty(analytics);
   const dRecent = recentWindowDemandQty(analytics);
   const dLines = effectiveDemandLines(analytics);
+  const orderHistoryQty = analytics.salesOrderQty;
+  const stockOutHistoryQty = analytics.timelineOutQty;
+  const tier = getOrderNowDemandTier(analytics);
 
-  if (dAll >= 80 || dRecent >= 45 || (dAll >= 50 && dRecent >= 25)) {
+  // High-demand SKUs should not receive small generic suggestions:
+  // if history/recent demand is strong, push to the full allowed cap (up to 100).
+  if (
+    dRecent >= 20 ||
+    dAll >= 35 ||
+    orderHistoryQty >= 25 ||
+    (orderHistoryQty >= 18 && stockOutHistoryQty >= 12)
+  ) {
     return Math.max(baseline, cap);
   }
 
-  const boosted = Math.max(
-    baseline,
-    Math.ceil(dAll * 0.5 + dRecent * 0.25 + Math.min(dLines, 40) * 1.2)
+  const weightedDemand = Math.ceil(
+    dAll * 0.7 +
+      dRecent * 0.6 +
+      Math.min(dLines, 60) * 1.8 +
+      orderHistoryQty * 0.55 +
+      stockOutHistoryQty * 0.35
   );
-  return Math.min(cap, Math.max(baseline, boosted));
+
+  // Even when not maxed out, keep meaningful floors for demanded SKUs.
+  const tierFloor =
+    tier === 'critical' ? Math.ceil(cap * 0.9) : tier === 'high' ? Math.ceil(cap * 0.7) : 0;
+  const boosted = Math.max(baseline, weightedDemand, tierFloor);
+  return Math.min(cap, boosted);
 };
 
 function shouldPrioritizeReorder(
