@@ -1,4 +1,10 @@
 import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+
+// Fixes: "No GlobalWorkerOptions.workerSrc specified."
+if ((pdfjsLib as any).GlobalWorkerOptions) {
+  (pdfjsLib as any).GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+}
 
 export type ParsedInvoiceLineDraft = {
   line_no: number;

@@ -1222,6 +1222,19 @@ const sanitizeUpcomingInvoiceMatchStatus = (value: string | null | undefined): U
   return 'unmatched';
 };
 
+function isMissingUpcomingInvoiceTablesError(err: any): boolean {
+  const msg = String(err?.message ?? '').toLowerCase();
+  const details = String(err?.details ?? '').toLowerCase();
+  return (
+    err?.code === '42P01' ||
+    msg.includes('upcoming_invoices') ||
+    msg.includes('upcoming_invoice_lines') ||
+    details.includes('upcoming_invoices') ||
+    details.includes('upcoming_invoice_lines') ||
+    err?.status === 400
+  );
+}
+
 export const createUpcomingInvoice = async (
   header: UpcomingInvoiceInsert,
   lines: UpcomingInvoiceLineInput[]
@@ -1232,7 +1245,12 @@ export const createUpcomingInvoice = async (
     .insert(header)
     .select('*')
     .single();
-  if (invoiceError) throw invoiceError;
+  if (invoiceError) {
+    if (isMissingUpcomingInvoiceTablesError(invoiceError)) {
+      throw new Error('Upcoming invoice tables are not available in this database yet.');
+    }
+    throw invoiceError;
+  }
 
   const lineRows = lines.map((line, idx) => ({
     ...line,
@@ -1245,7 +1263,12 @@ export const createUpcomingInvoice = async (
     const { error: linesError } = await client
       .from('upcoming_invoice_lines')
       .insert(lineRows);
-    if (linesError) throw linesError;
+    if (linesError) {
+      if (isMissingUpcomingInvoiceTablesError(linesError)) {
+        throw new Error('Upcoming invoice lines table is not available in this database yet.');
+      }
+      throw linesError;
+    }
   }
 
   const { data: fullInvoice, error: fullInvoiceError } = await client
@@ -1253,7 +1276,15 @@ export const createUpcomingInvoice = async (
     .select('*, upcoming_invoice_lines(*)')
     .eq('id', invoice.id)
     .single();
-  if (fullInvoiceError) throw fullInvoiceError;
+  if (fullInvoiceError) {
+    if (isMissingUpcomingInvoiceTablesError(fullInvoiceError)) {
+      return {
+        ...(invoice as UpcomingInvoice),
+        lines: []
+      };
+    }
+    throw fullInvoiceError;
+  }
 
   return {
     ...(fullInvoice as UpcomingInvoice),
@@ -1267,7 +1298,10 @@ export const getUpcomingInvoices = async (): Promise<UpcomingInvoice[]> => {
     .from('upcoming_invoices')
     .select('*, upcoming_invoice_lines(*)')
     .order('created_at', { ascending: false });
-  if (error) throw error;
+  if (error) {
+    if (isMissingUpcomingInvoiceTablesError(error)) return [];
+    throw error;
+  }
   return (data ?? []).map((row: any) => ({
     ...row,
     lines: (row.upcoming_invoice_lines ?? []) as UpcomingInvoiceLine[]
@@ -1281,7 +1315,10 @@ export const getUpcomingInvoiceByReference = async (reference: string): Promise<
     .select('*, upcoming_invoice_lines(*)')
     .eq('reference', reference)
     .maybeSingle();
-  if (error) throw error;
+  if (error) {
+    if (isMissingUpcomingInvoiceTablesError(error)) return null;
+    throw error;
+  }
   if (!data) return null;
   return {
     ...(data as UpcomingInvoice),
@@ -1291,21 +1328,39 @@ export const getUpcomingInvoiceByReference = async (reference: string): Promise<
 
 export const getIncomingByProductSummary = async (): Promise<IncomingByProductSummary[]> => {
   const client = supabase as any;
-  const { data, error } = await client
+  const { data: lines, error: linesError } = await client
     .from('upcoming_invoice_lines')
-    .select('matched_product_id, qty_kg, upcoming_invoices(reference, expected_arrival_date)')
+    .select('invoice_id, matched_product_id, qty_kg')
     .not('matched_product_id', 'is', null);
-  if (error) throw error;
+  if (linesError) {
+    if (isMissingUpcomingInvoiceTablesError(linesError)) return [];
+    throw linesError;
+  }
+
+  const { data: invoices, error: invoicesError } = await client
+    .from('upcoming_invoices')
+    .select('id, reference, expected_arrival_date');
+  if (invoicesError) {
+    if (isMissingUpcomingInvoiceTablesError(invoicesError)) return [];
+    throw invoicesError;
+  }
+
+  const invoiceById = new Map<string, { reference: string; expected_arrival_date: string | null }>();
+  for (const invoice of (invoices ?? []) as any[]) {
+    invoiceById.set(String(invoice.id), {
+      reference: String(invoice.reference ?? '').trim(),
+      expected_arrival_date: invoice.expected_arrival_date ? String(invoice.expected_arrival_date) : null
+    });
+  }
 
   const map = new Map<string, IncomingByProductSummary>();
-  for (const row of (data ?? []) as any[]) {
+  for (const row of (lines ?? []) as any[]) {
     const productId = String(row.matched_product_id ?? '');
     if (!productId) continue;
     const qty = toMoneyNumber(row.qty_kg, 0);
-    const invoiceRef = String(row.upcoming_invoices?.reference ?? '').trim();
-    const arrival = row.upcoming_invoices?.expected_arrival_date
-      ? String(row.upcoming_invoices.expected_arrival_date)
-      : null;
+    const invoice = invoiceById.get(String(row.invoice_id ?? ''));
+    const invoiceRef = invoice?.reference ?? '';
+    const arrival = invoice?.expected_arrival_date ?? null;
 
     if (!map.has(productId)) {
       map.set(productId, {
