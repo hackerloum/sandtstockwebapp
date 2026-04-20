@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { Database } from '../types/supabase';
 import { toMoneyNumber } from '../utils/stockUtils';
+import type { IncomingByProductSummary, UpcomingInvoice, UpcomingInvoiceLine, UpcomingInvoiceMatchStatus } from '../types';
 
 const supabaseUrl = 'https://ljkvwaduqvacmrvycshj.supabase.co';
 const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxqa3Z3YWR1cXZhY21ydnljc2hqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MTE3MTgsImV4cCI6MjA2OTQ4NzcxOH0.fkbZbCF8KTK5aupvRRu6dCycIgB9N4BnnxZNZd3cz4Q';
@@ -1204,6 +1205,130 @@ export const testProductReportsConnection = async () => {
     console.error('Product reports connection failed:', err);
     return false;
   }
+};
+
+type UpcomingInvoiceInsert = Omit<
+  UpcomingInvoice,
+  'id' | 'created_at' | 'updated_at' | 'lines'
+>;
+
+type UpcomingInvoiceLineInput = Omit<
+  UpcomingInvoiceLine,
+  'id' | 'created_at' | 'updated_at' | 'invoice_id'
+>;
+
+const sanitizeUpcomingInvoiceMatchStatus = (value: string | null | undefined): UpcomingInvoiceMatchStatus => {
+  if (value === 'matched' || value === 'unmatched' || value === 'manual') return value;
+  return 'unmatched';
+};
+
+export const createUpcomingInvoice = async (
+  header: UpcomingInvoiceInsert,
+  lines: UpcomingInvoiceLineInput[]
+): Promise<UpcomingInvoice> => {
+  const client = supabase as any;
+  const { data: invoice, error: invoiceError } = await client
+    .from('upcoming_invoices')
+    .insert(header)
+    .select('*')
+    .single();
+  if (invoiceError) throw invoiceError;
+
+  const lineRows = lines.map((line, idx) => ({
+    ...line,
+    invoice_id: invoice.id,
+    line_no: line.line_no ?? idx + 1,
+    match_status: sanitizeUpcomingInvoiceMatchStatus(line.match_status)
+  }));
+
+  if (lineRows.length > 0) {
+    const { error: linesError } = await client
+      .from('upcoming_invoice_lines')
+      .insert(lineRows);
+    if (linesError) throw linesError;
+  }
+
+  const { data: fullInvoice, error: fullInvoiceError } = await client
+    .from('upcoming_invoices')
+    .select('*, upcoming_invoice_lines(*)')
+    .eq('id', invoice.id)
+    .single();
+  if (fullInvoiceError) throw fullInvoiceError;
+
+  return {
+    ...(fullInvoice as UpcomingInvoice),
+    lines: (fullInvoice?.upcoming_invoice_lines ?? []) as UpcomingInvoiceLine[]
+  };
+};
+
+export const getUpcomingInvoices = async (): Promise<UpcomingInvoice[]> => {
+  const client = supabase as any;
+  const { data, error } = await client
+    .from('upcoming_invoices')
+    .select('*, upcoming_invoice_lines(*)')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((row: any) => ({
+    ...row,
+    lines: (row.upcoming_invoice_lines ?? []) as UpcomingInvoiceLine[]
+  }));
+};
+
+export const getUpcomingInvoiceByReference = async (reference: string): Promise<UpcomingInvoice | null> => {
+  const client = supabase as any;
+  const { data, error } = await client
+    .from('upcoming_invoices')
+    .select('*, upcoming_invoice_lines(*)')
+    .eq('reference', reference)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    ...(data as UpcomingInvoice),
+    lines: (data?.upcoming_invoice_lines ?? []) as UpcomingInvoiceLine[]
+  };
+};
+
+export const getIncomingByProductSummary = async (): Promise<IncomingByProductSummary[]> => {
+  const client = supabase as any;
+  const { data, error } = await client
+    .from('upcoming_invoice_lines')
+    .select('matched_product_id, qty_kg, upcoming_invoices(reference, expected_arrival_date)')
+    .not('matched_product_id', 'is', null);
+  if (error) throw error;
+
+  const map = new Map<string, IncomingByProductSummary>();
+  for (const row of (data ?? []) as any[]) {
+    const productId = String(row.matched_product_id ?? '');
+    if (!productId) continue;
+    const qty = toMoneyNumber(row.qty_kg, 0);
+    const invoiceRef = String(row.upcoming_invoices?.reference ?? '').trim();
+    const arrival = row.upcoming_invoices?.expected_arrival_date
+      ? String(row.upcoming_invoices.expected_arrival_date)
+      : null;
+
+    if (!map.has(productId)) {
+      map.set(productId, {
+        product_id: productId,
+        total_incoming_kg: 0,
+        earliest_arrival_date: arrival,
+        invoice_references: invoiceRef ? [invoiceRef] : [],
+        line_count: 0
+      });
+    }
+
+    const acc = map.get(productId)!;
+    acc.total_incoming_kg += qty;
+    acc.line_count += 1;
+    if (invoiceRef && !acc.invoice_references.includes(invoiceRef)) {
+      acc.invoice_references.push(invoiceRef);
+    }
+    if (arrival && (!acc.earliest_arrival_date || arrival < acc.earliest_arrival_date)) {
+      acc.earliest_arrival_date = arrival;
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) => b.total_incoming_kg - a.total_incoming_kg);
 };
 
 // Check current user's role and permissions

@@ -4,7 +4,7 @@ import {
   ShoppingCart, Clock, BarChart2, Plus, FileText, RefreshCcw, Zap,
   TrendingUp, Ban, FileDown
 } from 'lucide-react';
-import { Order, Product, StockMovement } from '../types';
+import { IncomingByProductSummary, Order, Product, StockMovement } from '../types';
 import {
   getStockStatus,
   formatCurrency,
@@ -24,6 +24,7 @@ interface DashboardProps {
   onCreateOrder?: () => void;
   onStockCount?: () => void;
   onNavigate?: (tab: string) => void;
+  incomingByProduct?: IncomingByProductSummary[];
   /** Opens the full reorder engine page (all items). */
   onOpenReorderEngine?: () => void;
 }
@@ -34,6 +35,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onCreateOrder,
   onStockCount,
   onNavigate,
+  incomingByProduct,
   onOpenReorderEngine
 }) => {
   const [products, setProducts] = useState<Product[]>([]);
@@ -93,9 +95,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
       .slice(0, 5);
   }, [products, movements]);
 
+  const incomingMap = useMemo(
+    () => new Map((incomingByProduct ?? []).map((x) => [x.product_id, x] as const)),
+    [incomingByProduct]
+  );
+
   const reorderPlanFull = useMemo(
-    () => buildReorderPlan(products, movements, { unlimited: true, orders }),
-    [products, movements, orders]
+    () => buildReorderPlan(products, movements, { unlimited: true, orders, incomingByProduct: incomingMap }),
+    [products, movements, orders, incomingMap]
   );
 
   const reorderPlan = useMemo(
@@ -162,6 +169,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
       icon: FileText, 
       onClick: () => onNavigate?.('purchase-orders'), 
       color: 'bg-purple-500',
+      disabled: !onNavigate
+    },
+    {
+      title: 'Upcoming Invoices',
+      icon: FileDown,
+      onClick: () => onNavigate?.('upcoming-invoices'),
+      color: 'bg-indigo-500',
       disabled: !onNavigate
     },
     { 
@@ -304,6 +318,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <p className="text-sm font-medium text-emerald-900 mt-2">
                           Suggested order: {row.suggestedOrderQty} units
                         </p>
+                        {row.incomingShipment && (
+                          <p className="text-xs text-blue-700 mt-1">
+                            Incoming: {row.incomingShipment.total_incoming_kg.toFixed(2)} kg
+                            {row.incomingShipment.earliest_arrival_date
+                              ? ` · ETA ${row.incomingShipment.earliest_arrival_date}`
+                              : ''}
+                          </p>
+                        )}
                         <p className="text-xs text-gray-500 mt-1">{row.rationale}</p>
                         {onCreatePurchaseOrder && (
                           <button
@@ -369,6 +391,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <p className="text-sm font-medium text-amber-950 mt-2">
                           Suggested order: {row.suggestedOrderQty} units
                         </p>
+                        {row.incomingShipment && (
+                          <p className="text-xs text-blue-700 mt-1">
+                            Incoming: {row.incomingShipment.total_incoming_kg.toFixed(2)} kg
+                            {row.incomingShipment.earliest_arrival_date
+                              ? ` · ETA ${row.incomingShipment.earliest_arrival_date}`
+                              : ''}
+                          </p>
+                        )}
                         <p className="text-xs text-gray-500 mt-1">{row.rationale}</p>
                         {onCreatePurchaseOrder && (
                           <button
@@ -434,6 +464,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <p className="text-sm text-slate-700 mt-2">
                           Reference qty (if you restock): {row.suggestedOrderQty} units
                         </p>
+                        {row.incomingShipment && (
+                          <p className="text-xs text-blue-700 mt-1">
+                            Incoming: {row.incomingShipment.total_incoming_kg.toFixed(2)} kg
+                            {row.incomingShipment.earliest_arrival_date
+                              ? ` · ETA ${row.incomingShipment.earliest_arrival_date}`
+                              : ''}
+                          </p>
+                        )}
                         <p className="text-xs text-slate-600 mt-1">{row.rationale}</p>
                         <p className="mt-2 text-xs font-medium text-slate-500 uppercase tracking-wide">
                           No suggested PO — verify first

@@ -451,6 +451,7 @@ export function downloadReorderSectionPdf<
     const kg = suggestedOrderKg(row.suggestedOrderQty, row.product.net_weight);
     return kg == null ? sum : sum + kg;
   }, 0);
+  const totalIncomingKg = rows.reduce((sum, row) => sum + (row.incomingShipment?.total_incoming_kg ?? 0), 0);
 
   const head = showPriority
     ? [
@@ -464,10 +465,24 @@ export function downloadReorderSectionPdf<
           'Recent (u)',
           'Sugg (u)',
           'Sugg (kg)',
+          'Incoming (kg)',
+          'ETA',
           'Rationale'
         ]
       ]
-    : [['#', 'Product', 'Code', 'Stock', 'Demand (u)', 'Recent (u)', 'Sugg (u)', 'Sugg (kg)', 'Rationale']];
+    : [[
+        '#',
+        'Product',
+        'Code',
+        'Stock',
+        'Demand (u)',
+        'Recent (u)',
+        'Sugg (u)',
+        'Sugg (kg)',
+        'Incoming (kg)',
+        'ETA',
+        'Rationale'
+      ]];
 
   const body = rows.map((row, idx) => {
     const p = row.product;
@@ -492,6 +507,8 @@ export function downloadReorderSectionPdf<
         String(recentWindowDemandQty(a)),
         String(row.suggestedOrderQty),
         formatSuggestedKgCell(kgLine),
+        row.incomingShipment ? row.incomingShipment.total_incoming_kg.toFixed(2) : '—',
+        row.incomingShipment?.earliest_arrival_date ?? '—',
         shortRat
       ];
     }
@@ -504,6 +521,8 @@ export function downloadReorderSectionPdf<
       String(recentWindowDemandQty(a)),
       String(row.suggestedOrderQty),
       formatSuggestedKgCell(kgLine),
+      row.incomingShipment ? row.incomingShipment.total_incoming_kg.toFixed(2) : '—',
+      row.incomingShipment?.earliest_arrival_date ?? '—',
       shortRat
     ];
   });
@@ -528,18 +547,22 @@ export function downloadReorderSectionPdf<
           6: { cellWidth: 16, halign: 'right' },
           7: { cellWidth: 14, halign: 'right' },
           8: { cellWidth: 14, halign: 'right' },
-          9: { cellWidth: 58 }
+          9: { cellWidth: 16, halign: 'right' },
+          10: { cellWidth: 16 },
+          11: { cellWidth: 42 }
         }
       : {
           0: { cellWidth: 9, halign: 'center' },
-          1: { cellWidth: 44 },
-          2: { cellWidth: 22 },
+          1: { cellWidth: 38 },
+          2: { cellWidth: 20 },
           3: { cellWidth: 14, halign: 'right' },
-          4: { cellWidth: 18, halign: 'right' },
-          5: { cellWidth: 18, halign: 'right' },
+          4: { cellWidth: 14, halign: 'right' },
+          5: { cellWidth: 14, halign: 'right' },
           6: { cellWidth: 14, halign: 'right' },
           7: { cellWidth: 14, halign: 'right' },
-          8: { cellWidth: 75 }
+          8: { cellWidth: 16, halign: 'right' },
+          9: { cellWidth: 16 },
+          10: { cellWidth: 66 }
         }
   });
 
@@ -549,6 +572,8 @@ export function downloadReorderSectionPdf<
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(0, 0, 0);
   doc.text(`Total suggested weight (this list): ${totalSuggestedKg.toFixed(2)} kg`, margin, summaryY);
+  summaryY += 5;
+  doc.text(`Total incoming (from uploaded invoices): ${totalIncomingKg.toFixed(2)} kg`, margin, summaryY);
   summaryY += 5;
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');

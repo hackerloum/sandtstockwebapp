@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
 import { Dashboard } from './components/Dashboard';
 import { ReorderEnginePage } from './components/ReorderEnginePage';
+import { UpcomingInvoicesPage } from './components/UpcomingInvoicesPage';
 import { ProductList } from './components/ProductList';
 import { EditProductPage } from './components/EditProductPage';
 import { ProductDetail } from './components/ProductDetail';
@@ -22,6 +23,7 @@ import {
   getStockMovements, 
   getOrders, 
   getPurchaseOrders, 
+  getIncomingByProductSummary,
   getBrands, 
   getSuppliers, 
   getActivityLog,
@@ -36,7 +38,20 @@ import {
   testProductVisibility
 } from './lib/supabase';
 
-type ActiveTab = 'dashboard' | 'products' | 'add-product' | 'edit-product' | 'movements' | 'orders' | 'purchase-orders' | 'reports' | 'product-reports' | 'activity' | 'reorder-engine' | 'debug';
+type ActiveTab =
+  | 'dashboard'
+  | 'products'
+  | 'add-product'
+  | 'edit-product'
+  | 'movements'
+  | 'orders'
+  | 'purchase-orders'
+  | 'reports'
+  | 'product-reports'
+  | 'activity'
+  | 'reorder-engine'
+  | 'upcoming-invoices'
+  | 'debug';
 
 type ProductListScrollState = {
   scrollOffset: number;
@@ -59,6 +74,15 @@ function AppContent() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [activities, setActivities] = useState<ActivityLog[]>([]);
+  const [incomingByProduct, setIncomingByProduct] = useState<
+    Array<{
+      product_id: string;
+      total_incoming_kg: number;
+      earliest_arrival_date: string | null;
+      invoice_references: string[];
+      line_count: number;
+    }>
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -83,11 +107,21 @@ function AppContent() {
         console.log('App: Testing product visibility...');
         await testProductVisibility();
         
-        const [productsData, movementsData, ordersData, purchaseOrdersData, brandsData, suppliersData, activitiesData] = await Promise.all([
+        const [
+          productsData,
+          movementsData,
+          ordersData,
+          purchaseOrdersData,
+          incomingByProductData,
+          brandsData,
+          suppliersData,
+          activitiesData
+        ] = await Promise.all([
           getProducts(),
           getStockMovements(),
           getOrders(),
           getPurchaseOrders(),
+          getIncomingByProductSummary().catch(() => []),
           getBrands(),
           getSuppliers(),
           getActivityLog()
@@ -97,6 +131,7 @@ function AppContent() {
         setMovements(movementsData);
         setOrders(ordersData);
         setPurchaseOrders(purchaseOrdersData);
+        setIncomingByProduct(incomingByProductData);
         setBrands(brandsData);
         setSuppliers(suppliersData);
         setActivities(activitiesData);
@@ -300,6 +335,15 @@ function AppContent() {
     setPurchaseOrders(prev => prev.filter(p => p.id !== id));
   };
 
+  const refreshIncomingByProduct = async () => {
+    try {
+      const data = await getIncomingByProductSummary();
+      setIncomingByProduct(data);
+    } catch {
+      // Ignore refresh errors here to avoid blocking UI workflows.
+    }
+  };
+
   const mainTabs = [
     { id: 'dashboard', label: 'Dashboard', icon: Home, permission: 'view_dashboard' },
     { id: 'products', label: 'Products', icon: Package, permission: 'view_products' },
@@ -309,6 +353,7 @@ function AppContent() {
 
   const secondaryTabs = [
     { id: 'reorder-engine', label: 'Reorder engine', icon: Zap, permission: 'view_dashboard' },
+    { id: 'upcoming-invoices', label: 'Upcoming invoices', icon: FileText, permission: 'view_dashboard' },
     { id: 'movements', label: 'Stock Movements', icon: ArrowUpDown, permission: 'view_movements' },
     { id: 'reports', label: 'Reports', icon: BarChart3, permission: 'view_reports' },
     { id: 'product-reports', label: 'Product Reports', icon: FileText, permission: 'view_reports' },
@@ -576,6 +621,7 @@ function AppContent() {
               setActiveTab('movements');
             }}
             onNavigate={(tab) => setActiveTab(tab as ActiveTab)}
+            incomingByProduct={incomingByProduct}
             onOpenReorderEngine={() => setActiveTab('reorder-engine')}
           />
         )}
@@ -585,6 +631,7 @@ function AppContent() {
             products={products}
             movements={movements}
             orders={orders}
+            incomingByProduct={incomingByProduct}
             loading={loading}
             onBack={() => setActiveTab('dashboard')}
             onCreatePurchaseOrder={(productId) => {
@@ -592,6 +639,14 @@ function AppContent() {
                 setActiveTab('purchase-orders');
               }
             }}
+          />
+        )}
+
+        {activeTab === 'upcoming-invoices' && hasPermission('view_dashboard') && (
+          <UpcomingInvoicesPage
+            products={products}
+            onSaved={refreshIncomingByProduct}
+            onBack={() => setActiveTab('dashboard')}
           />
         )}
 

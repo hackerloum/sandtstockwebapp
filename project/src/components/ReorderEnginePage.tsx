@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Zap, TrendingUp, Ban, FileDown } from 'lucide-react';
-import { Order, Product, StockMovement } from '../types';
+import { IncomingByProductSummary, Order, Product, StockMovement } from '../types';
 import {
   buildReorderPlan,
   formatOutTimelineSummary,
@@ -14,6 +14,7 @@ interface ReorderEnginePageProps {
   products: Product[];
   movements: StockMovement[];
   orders: Order[];
+  incomingByProduct?: IncomingByProductSummary[];
   loading?: boolean;
   onBack: () => void;
   onCreatePurchaseOrder?: (productId: string) => void;
@@ -23,13 +24,19 @@ export const ReorderEnginePage: React.FC<ReorderEnginePageProps> = ({
   products,
   movements,
   orders,
+  incomingByProduct,
   loading,
   onBack,
   onCreatePurchaseOrder
 }) => {
+  const incomingMap = useMemo(
+    () => new Map((incomingByProduct ?? []).map((x) => [x.product_id, x] as const)),
+    [incomingByProduct]
+  );
+
   const reorderPlan = useMemo(
-    () => buildReorderPlan(products, movements, { unlimited: true, orders }),
-    [products, movements, orders]
+    () => buildReorderPlan(products, movements, { unlimited: true, orders, incomingByProduct: incomingMap }),
+    [products, movements, orders, incomingMap]
   );
 
   if (loading) {
@@ -109,6 +116,14 @@ export const ReorderEnginePage: React.FC<ReorderEnginePageProps> = ({
                   <p className="text-sm font-medium text-emerald-900 mt-2">
                     Suggested order: {row.suggestedOrderQty} units
                   </p>
+                  {row.incomingShipment && (
+                    <p className="text-xs text-blue-700 mt-1">
+                      Incoming: {row.incomingShipment.total_incoming_kg.toFixed(2)} kg
+                      {row.incomingShipment.earliest_arrival_date
+                        ? ` · ETA ${row.incomingShipment.earliest_arrival_date}`
+                        : ''}
+                    </p>
+                  )}
                   <p className="text-xs text-gray-500 mt-1">{row.rationale}</p>
                   {onCreatePurchaseOrder && (
                     <button
@@ -170,6 +185,14 @@ export const ReorderEnginePage: React.FC<ReorderEnginePageProps> = ({
                   <p className="text-sm font-medium text-amber-950 mt-2">
                     Suggested order: {row.suggestedOrderQty} units
                   </p>
+                  {row.incomingShipment && (
+                    <p className="text-xs text-blue-700 mt-1">
+                      Incoming: {row.incomingShipment.total_incoming_kg.toFixed(2)} kg
+                      {row.incomingShipment.earliest_arrival_date
+                        ? ` · ETA ${row.incomingShipment.earliest_arrival_date}`
+                        : ''}
+                    </p>
+                  )}
                   <p className="text-xs text-gray-500 mt-1">{row.rationale}</p>
                   {onCreatePurchaseOrder && (
                     <button
@@ -237,6 +260,14 @@ export const ReorderEnginePage: React.FC<ReorderEnginePageProps> = ({
                   <p className="text-sm text-slate-700 mt-2">
                     Reference qty (if you restock): {row.suggestedOrderQty} units
                   </p>
+                  {row.incomingShipment && (
+                    <p className="text-xs text-blue-700 mt-1">
+                      Incoming: {row.incomingShipment.total_incoming_kg.toFixed(2)} kg
+                      {row.incomingShipment.earliest_arrival_date
+                        ? ` · ETA ${row.incomingShipment.earliest_arrival_date}`
+                        : ''}
+                    </p>
+                  )}
                   <p className="text-xs text-slate-600 mt-1">{row.rationale}</p>
                   <p className="mt-2 text-xs font-medium text-slate-500 uppercase tracking-wide">
                     No suggested PO — verify first

@@ -305,6 +305,13 @@ export type ReorderEngineRow<
   suggestedOrderQty: number;
   /** Set for {@link ReorderBucket.order_now} — recent timeline + total demand. */
   demandPriority?: DemandPriorityTier;
+  /** Incoming shipment context from upcoming invoices (display-only; does not alter suggestion math). */
+  incomingShipment?: {
+    total_incoming_kg: number;
+    earliest_arrival_date: string | null;
+    invoice_references: string[];
+    line_count: number;
+  };
 };
 
 const sortOrderNow = <
@@ -502,6 +509,15 @@ export const buildReorderPlan = <
     orders?: OrderForDemand[];
     /** When true, return every product in each bucket (no cap). */
     unlimited?: boolean;
+    incomingByProduct?: Map<
+      string,
+      {
+        total_incoming_kg: number;
+        earliest_arrival_date: string | null;
+        invoice_references: string[];
+        line_count: number;
+      }
+    >;
   }
 ): {
   orderNow: ReorderEngineRow<P>[];
@@ -519,6 +535,7 @@ export const buildReorderPlan = <
 
   for (const product of products) {
     const a = analyticsMap.get(product.id) ?? emptyMovementAnalytics(product.id);
+    const incomingShipment = options?.incomingByProduct?.get(product.id);
     const oos = product.current_stock <= 0;
     const hasDemand = effectiveDemandLines(a) > 0;
 
@@ -531,7 +548,8 @@ export const buildReorderPlan = <
         suggestPurchaseOrder: true,
         rationale: buildRationale('order_now', a, product),
         suggestedOrderQty,
-        demandPriority: getOrderNowDemandTier(a)
+        demandPriority: getOrderNowDemandTier(a),
+        incomingShipment
       });
     } else if (oos && !hasDemand) {
       const suggestedOrderQty = getSuggestedOrderQuantity(product);
@@ -541,7 +559,8 @@ export const buildReorderPlan = <
         bucket: 'review_before_order',
         suggestPurchaseOrder: false,
         rationale: buildRationale('review_before_order', a, product),
-        suggestedOrderQty
+        suggestedOrderQty,
+        incomingShipment
       });
     } else if (!oos && shouldPrioritizeReorder(product, a)) {
       const suggestedOrderQty = getDemandAwareSuggestedOrderQty(product, a);
@@ -551,7 +570,8 @@ export const buildReorderPlan = <
         bucket: 'prioritize_reorder',
         suggestPurchaseOrder: true,
         rationale: buildRationale('prioritize_reorder', a, product),
-        suggestedOrderQty
+        suggestedOrderQty,
+        incomingShipment
       });
     }
   }

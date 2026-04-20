@@ -189,3 +189,51 @@ export interface ProductReport {
     email: string;
   };
 }
+
+export type UpcomingInvoiceMatchStatus = 'matched' | 'unmatched' | 'manual';
+
+export interface UpcomingInvoiceLine {
+  id: string;
+  invoice_id: string;
+  line_no: number;
+  product_code: string;
+  product_name: string;
+  qty_kg: number;
+  price_per_kg_eur: number | null;
+  amount_eur: number | null;
+  customer_ref: string | null;
+  matched_product_id: string | null;
+  match_status: UpcomingInvoiceMatchStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpcomingInvoice {
+  id: string;
+  reference: string;
+  order_number: string | null;
+  info_label: string | null;
+  invoice_date: string | null;
+  shipping_date: string | null;
+  expected_arrival_date: string | null;
+  delivery_mode: string | null;
+  carrier: string | null;
+  payment_terms: string | null;
+  currency: string | null;
+  total_net_weight_kg: number | null;
+  total_amount_eur: number | null;
+  source_file_name: string | null;
+  raw_text: string | null;
+  created_at: string;
+  updated_at: string;
+  lines?: UpcomingInvoiceLine[];
+}
+
+export interface IncomingByProductSummary {
+  product_id: string;
+  total_incoming_kg: number;
+  earliest_arrival_date: string | null;
+  invoice_references: string[];
+  line_count: number;
+}
