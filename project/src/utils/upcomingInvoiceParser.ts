@@ -91,27 +91,42 @@ function extractHeader(rawText: string) {
 
 export function parseUpcomingInvoiceText(rawText: string): ParsedInvoiceDraft {
   const text = rawText.replace(/\r\n/g, '\n');
-  const lines = text.split('\n').map(normalizeSpaces).filter(Boolean);
   const parsedLines: ParsedInvoiceLineDraft[] = [];
 
-  for (const line of lines) {
-    const codeMatch = line.match(/\b(ITM\d{6,})\b/i);
-    if (!codeMatch) continue;
-    const productCode = codeMatch[1].toUpperCase();
+  // Parse by product-code blocks so we still extract correctly when PDF text is one long line.
+  const blockRegex = /\b(ITM\d{6,})\b/gi;
+  const matches = Array.from(text.matchAll(blockRegex));
+  for (let i = 0; i < matches.length; i += 1) {
+    const code = String(matches[i][1] ?? '').toUpperCase();
+    const start = matches[i].index ?? 0;
+    const end = i + 1 < matches.length ? (matches[i + 1].index ?? text.length) : text.length;
+    const segment = normalizeSpaces(text.slice(start, end));
 
-    const nameMatch = line.match(/\bITM\d{6,}\s+(.+?)\s+ALU NEUTRAL/i);
-    const productName = nameMatch?.[1]?.replace(/\s{2,}/g, ' ').trim() ?? '';
-    const pricePerKg = parseEuropeanNumber(line.match(/OMNI\+50\s+([\d\s]+,\d{2})/i)?.[1] ?? null);
-    const qty = parseEuropeanNumber(line.match(/\bKG\s+\d+\s+([\d\s]+,\d{2})/i)?.[1] ?? null);
-    const decimals = [...line.matchAll(/([\d\s]+,\d{2})/g)].map((m) => m[1]);
-    const amount = parseEuropeanNumber(decimals.length > 0 ? decimals[decimals.length - 1] : null);
-    const customerRef = line.match(/\bUN\d{4}\b/i)?.[0] ?? null;
+    const productName =
+      segment.match(/\bITM\d{6,}\s+(.+?)\s+ALU NEUTRAL/i)?.[1]?.trim() ??
+      segment.match(/\bITM\d{6,}\s+(.+?)\s+OMNI\+50/i)?.[1]?.trim() ??
+      '';
 
-    if (!productName || !qty || qty <= 0) continue;
+    const pricePerKg = parseEuropeanNumber(segment.match(/OMNI\+50\s+([\d\s]+,\d{2})/i)?.[1] ?? null);
+
+    const qty =
+      parseEuropeanNumber(segment.match(/\bKG\s+\d+\s+([\d\s]+,\d{2})/i)?.[1] ?? null) ??
+      parseEuropeanNumber(segment.match(/\bUN3082\s+([\d\s]+,\d{2})/i)?.[1] ?? null) ??
+      parseEuropeanNumber(segment.match(/\bQty\b.*?([\d\s]+,\d{2})/i)?.[1] ?? null);
+
+    const totalAfterTotal = parseEuropeanNumber(
+      segment.match(/\bTotal\s+([\d\s]+,\d{2})\s+KG\s+EUR/i)?.[1] ?? null
+    );
+    const decimals = [...segment.matchAll(/([\d\s]+,\d{2})/g)].map((m) => m[1]);
+    const fallbackAmount = parseEuropeanNumber(decimals.length > 0 ? decimals[decimals.length - 1] : null);
+    const amount = totalAfterTotal ?? fallbackAmount;
+    const customerRef = segment.match(/\bUN\d{4}\b/i)?.[0] ?? null;
+
+    if (!code || !productName || !qty || qty <= 0) continue;
 
     parsedLines.push({
       line_no: parsedLines.length + 1,
-      product_code: productCode,
+      product_code: code,
       product_name: productName,
       qty_kg: qty,
       price_per_kg_eur: pricePerKg,
