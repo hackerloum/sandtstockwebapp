@@ -14,6 +14,9 @@ import {
   type ReorderEngineRow
 } from './stockUtils';
 
+/** Title and PDF metadata author/creator for all exports from this module. */
+const PDF_BRAND = 'S&T Stock';
+
 export const generateOrderPDF = (order: Order, products: Product[]) => {
   // Create A4 document (210mm x 297mm)
   const doc = new jsPDF('p', 'mm', 'a4');
@@ -22,8 +25,8 @@ export const generateOrderPDF = (order: Order, products: Product[]) => {
   doc.setProperties({
     title: `Order ${order.order_number}`,
     subject: 'Order Details',
-    author: 'Argeville Stock Tracker',
-    creator: 'Argeville Stock Tracker'
+    author: PDF_BRAND,
+    creator: PDF_BRAND
   });
 
   // A4 dimensions in mm
@@ -41,11 +44,11 @@ export const generateOrderPDF = (order: Order, products: Product[]) => {
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(24);
   doc.setFont('helvetica', 'bold');
-  doc.text('ARGEVILLE', pageWidth / 2, 20, { align: 'center' });
+  doc.text(PDF_BRAND, pageWidth / 2, 20, { align: 'center' });
   
   doc.setFontSize(14);
   doc.setFont('helvetica', 'normal');
-  doc.text('Stock Tracker - Order Details', pageWidth / 2, 30, { align: 'center' });
+  doc.text('Order details', pageWidth / 2, 30, { align: 'center' });
   
   // Reset text color for content
   doc.setTextColor(0, 0, 0);
@@ -193,7 +196,7 @@ export const generateOrderPDF = (order: Order, products: Product[]) => {
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
   doc.text(`Generated on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}`, margin, footerY + 8);
-  doc.text('Argeville Stock Tracker System', pageWidth / 2, footerY + 8, { align: 'center' });
+  doc.text(PDF_BRAND, pageWidth / 2, footerY + 8, { align: 'center' });
   doc.text(`Order ID: ${order.id}`, pageWidth - margin, footerY + 8, { align: 'right' });
   
   return doc;
@@ -264,8 +267,8 @@ export const generateBulkOrdersPDF = (orders: Order[], products: Product[]) => {
   doc.setProperties({
     title: `Bulk Orders - ${orders.length} orders`,
     subject: 'Bulk Order Details',
-    author: 'Argeville Stock Tracker',
-    creator: 'Argeville Stock Tracker'
+    author: PDF_BRAND,
+    creator: PDF_BRAND
   });
 
   const pageWidth = 210;
@@ -283,7 +286,7 @@ export const generateBulkOrdersPDF = (orders: Order[], products: Product[]) => {
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(20);
   doc.setFont('helvetica', 'bold');
-  doc.text('ARGEVILLE', pageWidth / 2, 20, { align: 'center' });
+  doc.text(PDF_BRAND, pageWidth / 2, 20, { align: 'center' });
   
   doc.setFontSize(14);
   doc.setFont('helvetica', 'normal');
@@ -307,7 +310,7 @@ export const generateBulkOrdersPDF = (orders: Order[], products: Product[]) => {
       doc.setTextColor(255, 255, 255);
       doc.setFontSize(16);
       doc.setFont('helvetica', 'bold');
-      doc.text(`ARGEVILLE - Bulk Orders (Page ${currentPage})`, pageWidth / 2, 15, { align: 'center' });
+      doc.text(`${PDF_BRAND} — Bulk orders (page ${currentPage})`, pageWidth / 2, 15, { align: 'center' });
       
       doc.setTextColor(0, 0, 0);
       currentY = 40;
@@ -357,7 +360,7 @@ export const generateBulkOrdersPDF = (orders: Order[], products: Product[]) => {
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
   doc.text(`Generated on ${new Date().toLocaleDateString()} | Total Orders: ${orders.length}`, margin, footerY + 8);
-  doc.text('Argeville Stock Tracker System', pageWidth / 2, footerY + 8, { align: 'center' });
+  doc.text(PDF_BRAND, pageWidth / 2, footerY + 8, { align: 'center' });
   
   return doc;
 };
@@ -424,7 +427,7 @@ export function downloadReorderSectionPdf<
   doc.setProperties({
     title: `${sectionTitle} — Reorder list`,
     subject: 'Reorder engine export',
-    author: 'Argeville Stock Tracker'
+    author: PDF_BRAND
   });
 
   doc.setFillColor(66, 139, 202);
@@ -432,7 +435,7 @@ export function downloadReorderSectionPdf<
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(15);
   doc.setFont('helvetica', 'bold');
-  doc.text('ARGEVILLE — Stock Tracker', pageWidth / 2, 11, { align: 'center' });
+  doc.text(PDF_BRAND, pageWidth / 2, 11, { align: 'center' });
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.text(sectionTitle, pageWidth / 2, 19, { align: 'center' });
@@ -620,8 +623,8 @@ export function downloadInStockInventoryPdf(products: ProductRowForInventoryPdf[
   doc.setProperties({
     title: 'In-stock inventory',
     subject: 'Products with quantity on hand',
-    author: 'Argeville Stock Tracker',
-    creator: 'Argeville Stock Tracker'
+    author: PDF_BRAND,
+    creator: PDF_BRAND
   });
 
   doc.setFillColor(66, 139, 202);
@@ -629,10 +632,10 @@ export function downloadInStockInventoryPdf(products: ProductRowForInventoryPdf[
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(17);
   doc.setFont('helvetica', 'bold');
-  doc.text('ARGEVILLE', pageWidth / 2, 13, { align: 'center' });
+  doc.text(PDF_BRAND, pageWidth / 2, 13, { align: 'center' });
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text('Stock Tracker — In-stock inventory report', pageWidth / 2, 22, { align: 'center' });
+  doc.text('In-stock inventory report', pageWidth / 2, 22, { align: 'center' });
 
   doc.setTextColor(0, 0, 0);
   let y = 34;
@@ -669,7 +672,7 @@ export function downloadInStockInventoryPdf(products: ProductRowForInventoryPdf[
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
     const midY = barTop + 7;
-    doc.text('Argeville Stock Tracker', margin, midY);
+    doc.text(PDF_BRAND, margin, midY);
     doc.text(`Page ${pageNumber}`, pageWidth / 2, midY, { align: 'center' });
     const rightLine = `${inStock.length} SKUs · ${totalUnits.toLocaleString('en-TZ')} u · ${formatCurrency(totalValue)}`;
     doc.text(rightLine, pageWidth - margin, midY, { align: 'right' });
