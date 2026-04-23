@@ -4,6 +4,8 @@ import { Order, Product } from '../types';
 import {
   formatCurrency,
   formatDate,
+  getStockStatus,
+  getStatusText,
   resolveOrderGrandTotal,
   resolveOrderItemsForDisplay,
   effectiveDemandQty,
@@ -587,4 +589,159 @@ export function downloadReorderSectionPdf<
   const safeSlug = slug.replace(/[^a-z0-9-]+/gi, '-');
   const stamp = new Date().toISOString().slice(0, 10);
   doc.save(`reorder-${safeSlug}-${stamp}.pdf`);
-} 
+}
+
+/** Product as loaded in the UI (optional joined `brand` for PDF columns). */
+export type ProductRowForInventoryPdf = Product & { brand?: { name?: string } | null };
+
+/**
+ * Downloads a landscape PDF listing every SKU with current stock &gt; 0,
+ * with professional header/summary/footer and totals (units + inventory value in TZS).
+ */
+export function downloadInStockInventoryPdf(products: ProductRowForInventoryPdf[]): void {
+  const inStock = [...products]
+    .filter((p) => (Number(p.current_stock) || 0) > 0)
+    .sort((a, b) =>
+      (a.commercial_name || '').localeCompare(b.commercial_name || '', undefined, { sensitivity: 'base' })
+    );
+
+  const doc = new jsPDF('l', 'mm', 'a4');
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 12;
+  const contentWidth = pageWidth - 2 * margin;
+
+  const totalUnits = inStock.reduce((sum, p) => sum + (Number(p.current_stock) || 0), 0);
+  const totalValue = inStock.reduce(
+    (sum, p) => sum + (Number(p.current_stock) || 0) * (Number(p.price) || 0),
+    0
+  );
+
+  doc.setProperties({
+    title: 'In-stock inventory',
+    subject: 'Products with quantity on hand',
+    author: 'Argeville Stock Tracker',
+    creator: 'Argeville Stock Tracker'
+  });
+
+  doc.setFillColor(66, 139, 202);
+  doc.rect(0, 0, pageWidth, 28, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(17);
+  doc.setFont('helvetica', 'bold');
+  doc.text('ARGEVILLE', pageWidth / 2, 13, { align: 'center' });
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Stock Tracker — In-stock inventory report', pageWidth / 2, 22, { align: 'center' });
+
+  doc.setTextColor(0, 0, 0);
+  let y = 34;
+
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.rect(margin, y, contentWidth, 24, 'FD');
+
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`SKUs in stock: ${inStock.length}`, margin + 4, y + 10);
+  doc.text(`Total units on hand: ${totalUnits.toLocaleString('en-TZ')}`, margin + 4, y + 18);
+
+  doc.text(`Total inventory value: ${formatCurrency(totalValue)}`, margin + contentWidth * 0.5, y + 14);
+
+  y += 30;
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(
+    `Generated ${formatDate(new Date())} · Amounts in TZS · Status uses minimum stock rules (Low = at or below min).`,
+    margin,
+    y
+  );
+  y += 8;
+  doc.setTextColor(0, 0, 0);
+
+  const drawFooter = (pageNumber: number) => {
+    const barTop = pageHeight - 11;
+    doc.setFillColor(66, 139, 202);
+    doc.rect(0, barTop, pageWidth, 11, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'normal');
+    const midY = barTop + 7;
+    doc.text('Argeville Stock Tracker', margin, midY);
+    doc.text(`Page ${pageNumber}`, pageWidth / 2, midY, { align: 'center' });
+    const rightLine = `${inStock.length} SKUs · ${totalUnits.toLocaleString('en-TZ')} u · ${formatCurrency(totalValue)}`;
+    doc.text(rightLine, pageWidth - margin, midY, { align: 'right' });
+  };
+
+  if (inStock.length === 0) {
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'italic');
+    doc.text('No products currently have quantity on hand (all levels are zero).', margin, y + 4);
+    drawFooter(1);
+    doc.save(`In-stock_inventory_${new Date().toISOString().slice(0, 10)}.pdf`);
+    return;
+  }
+
+  const head = [
+    ['#', 'Code', 'Product', 'Type', 'Category', 'Brand', 'Qty', 'Min', 'Unit', 'Line value', 'Status']
+  ];
+
+  const body = inStock.map((p, idx) => {
+    const q = Number(p.current_stock) || 0;
+    const unit = Number(p.price) || 0;
+    const lineVal = q * unit;
+    const brand = (p.brand?.name || '').trim() || '—';
+    const status = getStatusText(getStockStatus(p));
+    return [
+      String(idx + 1),
+      String(p.code || ''),
+      String(p.commercial_name || ''),
+      String(p.product_type || '—'),
+      String(p.category || '—'),
+      brand,
+      String(q),
+      String(p.min_stock ?? ''),
+      formatCurrency(unit),
+      formatCurrency(lineVal),
+      status
+    ];
+  });
+
+  autoTable(doc, {
+    startY: y,
+    head,
+    body,
+    theme: 'striped',
+    headStyles: {
+      fillColor: [66, 139, 202],
+      textColor: 255,
+      fontSize: 8,
+      fontStyle: 'bold'
+    },
+    bodyStyles: { fontSize: 7, cellPadding: 1.6 },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
+    margin: { left: margin, right: margin, bottom: 14 },
+    styles: { lineColor: [226, 232, 240], lineWidth: 0.1 },
+    columnStyles: {
+      0: { cellWidth: 9, halign: 'center' },
+      1: { cellWidth: 20 },
+      2: { cellWidth: 46, overflow: 'linebreak' },
+      3: { cellWidth: 24, overflow: 'linebreak' },
+      4: { cellWidth: 22, overflow: 'linebreak' },
+      5: { cellWidth: 22, overflow: 'linebreak' },
+      6: { cellWidth: 12, halign: 'right' },
+      7: { cellWidth: 11, halign: 'right' },
+      8: { cellWidth: 26, halign: 'right' },
+      9: { cellWidth: 28, halign: 'right' },
+      10: { cellWidth: 22 }
+    },
+    didDrawPage: (data) => {
+      drawFooter(data.pageNumber);
+    }
+  });
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  doc.save(`In-stock_inventory_${stamp}.pdf`);
+}

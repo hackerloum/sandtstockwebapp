@@ -1,8 +1,9 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { Search, Plus, Edit2, Trash2, Eye, Package, Filter, X, SortAsc, SortDesc, Clock, Download, RotateCcw } from 'lucide-react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import { Search, Plus, Edit2, Trash2, Eye, Package, Filter, X, SortAsc, SortDesc, Clock, Download, RotateCcw, FileText } from 'lucide-react';
 import { Product } from '../types';
 import { getStockStatus, getStockStatusColor, getStatusText, formatCurrency, formatWeight, getUpdatedTimeline, getUpdatedTimelineLabel, getUpdatedTimelineBadgeClass, isNotUpdatedWithin7Days } from '../utils/stockUtils';
 import { exportProductsToExcel, exportFilteredProductsToExcel } from '../utils/excelUtils';
+import { downloadInStockInventoryPdf } from '../utils/pdfUtils';
 import { PageHeader, PageContainer, PageSection, EmptyState } from './shared/PageLayout';
 import { Button } from './shared/Button';
 import { Table } from './shared/Table';
@@ -102,17 +103,7 @@ export const ProductList: React.FC<ProductListProps> = ({
     updateType: 'percentage' as 'percentage' | 'fixed'
   });
 
-  const searchSectionRef = useRef<HTMLDivElement>(null);
-
-  const scrollToSearchAndFocus = useCallback(() => {
-    const root = searchSectionRef.current;
-    if (!root) return;
-    root.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    const input = root.querySelector<HTMLInputElement>('input[type="text"]');
-    window.setTimeout(() => {
-      input?.focus({ preventScroll: true });
-    }, 250);
-  }, []);
+  const [showFloatingSearch, setShowFloatingSearch] = useState(false);
 
   // Cast products to ExtendedProduct for brand/supplier access
   const extendedProducts = products as ExtendedProduct[];
@@ -129,6 +120,15 @@ export const ProductList: React.FC<ProductListProps> = ({
       alert('❌ Failed to export products. Please try again.');
     }
   };
+
+  const handleDownloadInStockPdf = useCallback(() => {
+    try {
+      downloadInStockInventoryPdf(extendedProducts);
+    } catch (error) {
+      console.error('In-stock inventory PDF failed:', error);
+      alert('Could not generate the PDF. Please try again.');
+    }
+  }, [extendedProducts]);
 
   const handleExportFilteredProducts = () => {
     try {
@@ -502,6 +502,24 @@ export const ProductList: React.FC<ProductListProps> = ({
     }
   }, [searchHistory, minPrice, maxPrice, minStock, maxStock]);
 
+  useEffect(() => {
+    if (!showFloatingSearch) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const focusId = window.setTimeout(() => {
+      document.getElementById('floating-product-search-input')?.focus();
+    }, 0);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowFloatingSearch(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.clearTimeout(focusId);
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [showFloatingSearch]);
+
   // Handle sort
   const handleSort = useCallback((field: SortField) => {
     if (sortField === field) {
@@ -792,6 +810,15 @@ export const ProductList: React.FC<ProductListProps> = ({
               >
                 Export All
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                icon={<FileText className="w-4 h-4" />}
+                onClick={handleDownloadInStockPdf}
+                title="Download PDF: all products with stock on hand, totals in TZS"
+              >
+                In-stock PDF
+              </Button>
               {hasActiveFilters && (
                 <Button
                   variant="outline"
@@ -867,7 +894,7 @@ export const ProductList: React.FC<ProductListProps> = ({
         
         <PageSection>
           {/* Search and Filters */}
-          <div ref={searchSectionRef} className="space-y-4 mb-6">
+          <div className="space-y-4 mb-6">
             {/* Main Search Bar */}
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -1305,15 +1332,127 @@ export const ProductList: React.FC<ProductListProps> = ({
       </PageContainer>
 
       {!showBulkPriceUpdate && (
-        <button
-          type="button"
-          onClick={scrollToSearchAndFocus}
-          className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg ring-1 ring-black/5 transition hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 md:bottom-8 md:right-8"
-          aria-label="Jump to product search"
-          title="Search products"
-        >
-          <Search className="h-6 w-6 shrink-0" aria-hidden />
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={() => setShowFloatingSearch(true)}
+            className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg ring-1 ring-black/5 transition hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 md:bottom-8 md:right-8"
+            aria-label="Open product search"
+            title="Search products"
+          >
+            <Search className="h-6 w-6 shrink-0" aria-hidden />
+          </button>
+
+          {showFloatingSearch && (
+            <div
+              className="fixed inset-0 z-[45] flex flex-col justify-end sm:justify-center sm:pt-0 bg-black/50 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="floating-search-title"
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) setShowFloatingSearch(false);
+              }}
+            >
+              <div
+                className="mx-auto w-full max-w-lg rounded-xl bg-white shadow-xl border border-gray-200 max-h-[min(85vh,32rem)] flex flex-col"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between gap-2 border-b border-gray-200 px-4 py-3 shrink-0">
+                  <h2 id="floating-search-title" className="text-lg font-semibold text-gray-900">
+                    Search products
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setShowFloatingSearch(false)}
+                    className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                    aria-label="Close search"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <div className="p-4 overflow-y-auto flex-1 min-h-0 space-y-3">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
+                    <Input
+                      id="floating-product-search-input"
+                      type="text"
+                      placeholder="Name, code, brand, notes…"
+                      value={filters.searchTerm}
+                      onChange={(e) => handleSearch(e.target.value)}
+                      className="pl-10 pr-10"
+                      autoComplete="off"
+                    />
+                    {filters.searchTerm && (
+                      <button
+                        type="button"
+                        onClick={() => handleSearch('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                        aria-label="Clear search"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  {searchSuggestions.length > 0 && filters.searchTerm && (
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-2">
+                      <div className="text-xs text-gray-500 mb-2 flex items-center">
+                        <Clock className="w-3 h-3 mr-1" />
+                        Suggestions
+                      </div>
+                      {searchSuggestions.map((suggestion, index) => (
+                        <button
+                          key={index}
+                          type="button"
+                          onClick={() => {
+                            handleSuggestionClick(suggestion);
+                            setShowFloatingSearch(false);
+                          }}
+                          className="block w-full text-left px-2 py-1.5 text-sm hover:bg-white rounded"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {searchHistory.length > 0 && !filters.searchTerm && (
+                    <div className="flex flex-wrap gap-2">
+                      <span className="text-sm text-gray-500 flex items-center w-full">
+                        <Clock className="w-3 h-3 mr-1 shrink-0" />
+                        Recent searches
+                      </span>
+                      {searchHistory.map((term, index) => (
+                        <button
+                          key={index}
+                          type="button"
+                          onClick={() => {
+                            handleSuggestionClick(term);
+                            setShowFloatingSearch(false);
+                          }}
+                          className="text-sm bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded"
+                        >
+                          {term}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="text-xs text-gray-500">
+                    {sortedProducts.length} of {products.length} products match filters.
+                  </p>
+                </div>
+
+                <div className="border-t border-gray-200 px-4 py-3 shrink-0">
+                  <Button type="button" variant="primary" className="w-full" onClick={() => setShowFloatingSearch(false)}>
+                    Done
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Bulk Price Update Modal */}
