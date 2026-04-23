@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Search, Plus, Edit2, Trash2, Eye, Package, Filter, X, SortAsc, SortDesc, Clock, Download, RotateCcw } from 'lucide-react';
 import { Product } from '../types';
 import { getStockStatus, getStockStatusColor, getStatusText, formatCurrency, formatWeight, getUpdatedTimeline, getUpdatedTimelineLabel, getUpdatedTimelineBadgeClass, isNotUpdatedWithin7Days } from '../utils/stockUtils';
@@ -102,6 +102,18 @@ export const ProductList: React.FC<ProductListProps> = ({
     updateType: 'percentage' as 'percentage' | 'fixed'
   });
 
+  const searchSectionRef = useRef<HTMLDivElement>(null);
+
+  const scrollToSearchAndFocus = useCallback(() => {
+    const root = searchSectionRef.current;
+    if (!root) return;
+    root.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const input = root.querySelector<HTMLInputElement>('input[type="text"]');
+    window.setTimeout(() => {
+      input?.focus({ preventScroll: true });
+    }, 250);
+  }, []);
+
   // Cast products to ExtendedProduct for brand/supplier access
   const extendedProducts = products as ExtendedProduct[];
 
@@ -155,7 +167,7 @@ export const ProductList: React.FC<ProductListProps> = ({
 
     const confirmMessage = updateType === 'percentage' 
       ? `Are you sure you want to update prices by ${percentage > 0 ? '+' : ''}${percentage}% for all ${extendedProducts.length} products?`
-      : `Are you sure you want to set ALL product prices to $${fixedAmount}?`;
+      : `Are you sure you want to set ALL product prices to ${formatCurrency(fixedAmount)}?`;
 
     if (!confirm(confirmMessage)) {
       return;
@@ -855,7 +867,7 @@ export const ProductList: React.FC<ProductListProps> = ({
         
         <PageSection>
           {/* Search and Filters */}
-          <div className="space-y-4 mb-6">
+          <div ref={searchSectionRef} className="space-y-4 mb-6">
             {/* Main Search Bar */}
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -1135,10 +1147,15 @@ export const ProductList: React.FC<ProductListProps> = ({
                   </div>
                   <div className="text-center">
                     <div className="text-2xl font-bold text-purple-600">
-                      ${sortedProducts.reduce((sum, p) => sum + (p.price || 0), 0).toLocaleString()}
+                      {formatCurrency(
+                        sortedProducts.reduce(
+                          (sum, p) => sum + (p.current_stock || 0) * (p.price || 0),
+                          0
+                        )
+                      )}
                     </div>
                     <div className="text-sm text-gray-600">Total Value</div>
-                    <div className="text-xs text-gray-400">Price Sum</div>
+                    <div className="text-xs text-gray-400">Stock × price</div>
                   </div>
                 </div>
                 
@@ -1287,6 +1304,18 @@ export const ProductList: React.FC<ProductListProps> = ({
         </PageSection>
       </PageContainer>
 
+      {!showBulkPriceUpdate && (
+        <button
+          type="button"
+          onClick={scrollToSearchAndFocus}
+          className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg ring-1 ring-black/5 transition hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 md:bottom-8 md:right-8"
+          aria-label="Jump to product search"
+          title="Search products"
+        >
+          <Search className="h-6 w-6 shrink-0" aria-hidden />
+        </button>
+      )}
+
       {/* Bulk Price Update Modal */}
       {showBulkPriceUpdate && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -1350,12 +1379,12 @@ export const ProductList: React.FC<ProductListProps> = ({
               ) : (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Set All Prices To ($)
+                    Set all unit prices to (TSh)
                   </label>
                   <Input
                     type="number"
                     step="0.01"
-                    placeholder="e.g., 25.99 to set all prices to $25.99"
+                    placeholder="e.g., 25000 for TSh 25,000 per unit"
                     value={bulkPriceUpdate.fixedAmount}
                     onChange={(e) => setBulkPriceUpdate(prev => ({ ...prev, fixedAmount: parseFloat(e.target.value) || 0 }))}
                   />
@@ -1370,12 +1399,12 @@ export const ProductList: React.FC<ProductListProps> = ({
                 <h4 className="text-sm font-medium text-gray-700 mb-2">Preview</h4>
                 <div className="text-xs text-gray-600 space-y-1">
                   <div>Products to update: <strong>{extendedProducts.length}</strong></div>
-                  <div>Current total value: <strong>${extendedProducts.reduce((sum, p) => sum + (p.price || 0), 0).toLocaleString()}</strong></div>
-                  <div>New total value: <strong>${extendedProducts.reduce((sum, p) => sum + calculateNewPrice(p.price || 0), 0).toLocaleString()}</strong></div>
+                  <div>Current inventory value: <strong>{formatCurrency(extendedProducts.reduce((sum, p) => sum + (p.current_stock || 0) * (p.price || 0), 0))}</strong></div>
+                  <div>New inventory value: <strong>{formatCurrency(extendedProducts.reduce((sum, p) => sum + (p.current_stock || 0) * calculateNewPrice(p.price || 0), 0))}</strong></div>
                   <div>Change: <strong className={bulkPriceUpdate.updateType === 'percentage' ? (bulkPriceUpdate.percentage > 0 ? 'text-green-600' : 'text-red-600') : (bulkPriceUpdate.fixedAmount > 0 ? 'text-green-600' : 'text-red-600')}>
                     {bulkPriceUpdate.updateType === 'percentage' 
                       ? `${bulkPriceUpdate.percentage > 0 ? '+' : ''}${bulkPriceUpdate.percentage}%`
-                      : `Set all to $${bulkPriceUpdate.fixedAmount}`
+                      : `Set all unit prices to ${formatCurrency(bulkPriceUpdate.fixedAmount)}`
                     }
                   </strong></div>
                 </div>
