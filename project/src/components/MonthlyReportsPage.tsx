@@ -13,9 +13,9 @@ import {
   TrendingDown,
   TrendingUp
 } from 'lucide-react';
-import type { MonthlyReportData, Order, Product } from '../types';
+import type { DailyClosing, MonthlyReportData, Order, Product } from '../types';
 import { formatCurrency, formatDate, resolveOrderItemsForDisplay, toMoneyNumber } from '../utils/stockUtils';
-import { getMonthlyReportData } from '../lib/supabase';
+import { getLatestMonthlyReportMonth, getMonthlyReportData } from '../lib/supabase';
 
 type MonthlyReportsPageProps = {
   orders: Order[];
@@ -80,6 +80,19 @@ const isWithinMonth = (dateValue: string | null | undefined, start: Date, next: 
 const sumBy = <T,>(rows: T[], selector: (row: T) => unknown) =>
   rows.reduce((sum, row) => sum + toMoneyNumber(selector(row), 0), 0);
 
+const getDailyClosingTotal = (row: DailyClosing) => {
+  const salesTotal = toMoneyNumber(row.box_product_sales, 0) + toMoneyNumber(row.oil_sales, 0);
+  if (salesTotal > 0) return salesTotal;
+
+  const cashBreakdownTotal =
+    toMoneyNumber(row.cash_on_hand_box, 0) +
+    toMoneyNumber(row.cash_on_hand_oil, 0) +
+    toMoneyNumber(row.cash_on_hand_perfume, 0);
+  if (cashBreakdownTotal > 0) return cashBreakdownTotal;
+
+  return toMoneyNumber(row.cash_on_hand, 0);
+};
+
 const csvEscape = (value: unknown) => {
   const text = value === null || value === undefined ? '' : String(value);
   return `"${text.replace(/"/g, '""')}"`;
@@ -118,6 +131,24 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
 
   const month = useMemo(() => getMonthBounds(monthValue), [monthValue]);
 
+  useEffect(() => {
+    let isActive = true;
+
+    getLatestMonthlyReportMonth()
+      .then((latestMonth) => {
+        if (isActive && latestMonth) {
+          setMonthValue(latestMonth);
+        }
+      })
+      .catch((err) => {
+        console.error('Latest monthly report month lookup failed:', err);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
   const loadReport = useCallback(async () => {
     try {
       setLoading(true);
@@ -149,10 +180,7 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
 
   const analytics = useMemo(() => {
     const totalOrderRevenue = sumBy(monthlyOrders, (order) => order.total_amount);
-    const dailyClosingSales = sumBy(
-      reportData.dailyClosings,
-      (row) => toMoneyNumber(row.box_product_sales, 0) + toMoneyNumber(row.oil_sales, 0)
-    );
+    const dailyClosingSales = sumBy(reportData.dailyClosings, getDailyClosingTotal);
     const totalExpenses = sumBy(reportData.expenses, (expense) => expense.amount);
     const approvedExpenses = sumBy(
       reportData.expenses.filter((expense) => expense.is_approved),
@@ -272,7 +300,7 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
           row.date,
           'Closing',
           row.is_reconciled ? 'reconciled' : 'open',
-          toMoneyNumber(row.box_product_sales, 0) + toMoneyNumber(row.oil_sales, 0),
+          getDailyClosingTotal(row),
           row.notes || ''
         ].map(csvEscape).join(',')
       ),
@@ -357,7 +385,7 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
-          label="Daily closing sales"
+          label="Daily closing cash"
           value={formatCurrency(analytics.dailyClosingSales)}
           detail={`${reportData.dailyClosings.length} closing records`}
           icon={Banknote}
@@ -533,7 +561,7 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50">
               <tr>
-                {['Date', 'Box sales', 'Oil sales', 'Bank', 'Petty cash', 'Status', 'Notes'].map((heading) => (
+                {['Date', 'Box cash', 'Oil cash', 'Perfume cash', 'Cash total', 'Bank', 'Petty cash', 'Status', 'Notes'].map((heading) => (
                   <th key={heading} className="px-4 py-3 text-left font-medium text-gray-500">{heading}</th>
                 ))}
               </tr>
@@ -542,8 +570,10 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
               {reportData.dailyClosings.map((row) => (
                 <tr key={row.id}>
                   <td className="px-4 py-3 font-medium text-gray-900">{formatDate(row.date)}</td>
-                  <td className="px-4 py-3 text-gray-700">{formatCurrency(row.box_product_sales)}</td>
-                  <td className="px-4 py-3 text-gray-700">{formatCurrency(row.oil_sales)}</td>
+                  <td className="px-4 py-3 text-gray-700">{formatCurrency(row.cash_on_hand_box)}</td>
+                  <td className="px-4 py-3 text-gray-700">{formatCurrency(row.cash_on_hand_oil)}</td>
+                  <td className="px-4 py-3 text-gray-700">{formatCurrency(row.cash_on_hand_perfume)}</td>
+                  <td className="px-4 py-3 text-gray-700">{formatCurrency(getDailyClosingTotal(row))}</td>
                   <td className="px-4 py-3 text-gray-700">{formatCurrency(row.bank_deposit)}</td>
                   <td className="px-4 py-3 text-gray-700">{formatCurrency(row.petty_cash)}</td>
                   <td className="px-4 py-3">
@@ -556,7 +586,7 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
               ))}
               {reportData.dailyClosings.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-gray-500">No daily closings found.</td>
+                  <td colSpan={9} className="px-4 py-8 text-center text-gray-500">No daily closings found.</td>
                 </tr>
               )}
             </tbody>

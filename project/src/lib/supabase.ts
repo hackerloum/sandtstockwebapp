@@ -16,8 +16,10 @@ import type {
 
 const supabaseUrl = 'https://ljkvwaduqvacmrvycshj.supabase.co';
 const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxqa3Z3YWR1cXZhY21ydnljc2hqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MTE3MTgsImV4cCI6MjA2OTQ4NzcxOH0.fkbZbCF8KTK5aupvRRu6dCycIgB9N4BnnxZNZd3cz4Q';
+const supabaseServiceRoleKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxqa3Z3YWR1cXZhY21ydnljc2hqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MzkxMTcxOCwiZXhwIjoyMDY5NDg3NzE4fQ.yTH08Ylnmyh7Dcgy8QaQgABZrTG1LPylK1ET_MGLvlw';
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+const createServiceRoleClient = () => createClient(supabaseUrl, supabaseServiceRoleKey);
 
 /** Map joined order_items + product embed into app OrderItem (coerce decimals, name from join). */
 function mapOrderItemRowFromQuery(item: Record<string, unknown>) {
@@ -1178,6 +1180,7 @@ type ReportQueryBuilder = PromiseLike<ReportQueryResult> & {
   lt: (column: string, value: string) => ReportQueryBuilder;
   eq: (column: string, value: string) => ReportQueryBuilder;
   order: (column: string, options?: { ascending?: boolean }) => ReportQueryBuilder;
+  limit: (count: number) => ReportQueryBuilder;
 };
 
 type ReportClient = {
@@ -1188,7 +1191,7 @@ export const getMonthlyReportData = async (
   monthStart: string,
   nextMonthStart: string
 ): Promise<MonthlyReportData> => {
-  const client = supabase as unknown as ReportClient;
+  const client = createServiceRoleClient() as unknown as ReportClient;
 
   const [
     dailyClosingsResult,
@@ -1276,6 +1279,77 @@ export const getMonthlyReportData = async (
       normalizeMoneyFields(row, ['custom_price'])
     ) as PriceOverride[]
   };
+};
+
+const monthValueFromDatabaseDate = (value: unknown): string | null => {
+  if (!value) return null;
+  const text = String(value);
+  const directMonth = text.match(/^(\d{4}-\d{2})/);
+  if (directMonth) return directMonth[1];
+
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+};
+
+export const getLatestMonthlyReportMonth = async (): Promise<string | null> => {
+  const client = createServiceRoleClient() as unknown as ReportClient;
+
+  const [
+    latestDailyClosing,
+    latestExpense,
+    latestMonthlyClosing,
+    latestVendorPurchase,
+    latestPriceOverride
+  ] = await Promise.all([
+    client
+      .from('daily_closings')
+      .select('date')
+      .order('date', { ascending: false })
+      .limit(1),
+    client
+      .from('expenses')
+      .select('date')
+      .order('date', { ascending: false })
+      .limit(1),
+    client
+      .from('monthly_balance_closings')
+      .select('month_start')
+      .order('month_start', { ascending: false })
+      .limit(1),
+    client
+      .from('vendor_purchases')
+      .select('purchase_date')
+      .order('purchase_date', { ascending: false })
+      .limit(1),
+    client
+      .from('price_overrides')
+      .select('applied_at')
+      .order('applied_at', { ascending: false })
+      .limit(1)
+  ]);
+
+  const results = [
+    latestDailyClosing,
+    latestExpense,
+    latestMonthlyClosing,
+    latestVendorPurchase,
+    latestPriceOverride
+  ];
+  const failed = results.find((result) => result.error);
+  if (failed?.error) throw failed.error;
+
+  const candidates = [
+    latestDailyClosing.data?.[0]?.date,
+    latestExpense.data?.[0]?.date,
+    latestMonthlyClosing.data?.[0]?.month_start,
+    latestVendorPurchase.data?.[0]?.purchase_date,
+    latestPriceOverride.data?.[0]?.applied_at
+  ]
+    .map(monthValueFromDatabaseDate)
+    .filter((value): value is string => Boolean(value));
+
+  return candidates.sort((a, b) => b.localeCompare(a))[0] || null;
 };
 
 export const testConnection = async () => {
