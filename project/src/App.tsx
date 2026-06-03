@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { BarChart3, Package, ArrowUpDown, Home, Plus, ShoppingCart, FileText, Activity, LogOut, Menu, AlertCircle, X, CheckCircle, Zap } from 'lucide-react';
+import { BarChart3, Package, ArrowUpDown, Home, Plus, ShoppingCart, FileText, Activity, LogOut, Menu, AlertCircle, X, CheckCircle, Zap, CalendarDays } from 'lucide-react';
 import { Product, StockMovement, Order, PurchaseOrder, Brand, Supplier, ActivityLog } from './types';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
@@ -14,6 +14,7 @@ import { AddProductPage } from './components/AddProductPage';
 import { OrderManagement } from './components/OrderManagement';
 import { PurchaseOrders } from './components/PurchaseOrders';
 import { AdvancedReports } from './components/AdvancedReports';
+import { MonthlyReportsPage } from './components/MonthlyReportsPage';
 import { NotificationCenter } from './components/NotificationCenter';
 import { ActivityLogComponent } from './components/ActivityLog';
 import { ProductReports } from './components/ProductReports';
@@ -47,6 +48,7 @@ type ActiveTab =
   | 'orders'
   | 'purchase-orders'
   | 'reports'
+  | 'monthly-reports'
   | 'product-reports'
   | 'activity'
   | 'reorder-engine'
@@ -356,6 +358,7 @@ function AppContent() {
     { id: 'upcoming-invoices', label: 'Upcoming invoices', icon: FileText, permission: 'view_dashboard' },
     { id: 'movements', label: 'Stock Movements', icon: ArrowUpDown, permission: 'view_movements' },
     { id: 'reports', label: 'Reports', icon: BarChart3, permission: 'view_reports' },
+    { id: 'monthly-reports', label: 'Monthly Reports', icon: CalendarDays, permission: 'view_reports' },
     { id: 'product-reports', label: 'Product Reports', icon: FileText, permission: 'view_reports' },
     { id: 'activity', label: 'Activity Log', icon: Activity, permission: 'view_activity_log' },
     { id: 'add-product', label: 'Add Product', icon: Plus, permission: 'add_product' },
@@ -719,6 +722,13 @@ function AppContent() {
             orders={orders}
             movements={movements}
             purchaseOrders={purchaseOrders}
+          />
+        )}
+
+        {activeTab === 'monthly-reports' && hasPermission('view_reports') && (
+          <MonthlyReportsPage
+            orders={orders}
+            products={products}
           />
         )}
 

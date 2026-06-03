@@ -1,3 +1,11 @@
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[];
+
 export interface Product {
   id: string;
   code: string;
@@ -236,4 +244,101 @@ export interface IncomingByProductSummary {
   earliest_arrival_date: string | null;
   invoice_references: string[];
   line_count: number;
+}
+
+export interface DailyClosing {
+  id: string;
+  date: string;
+  cash_on_hand: number;
+  bank_deposit: number;
+  petty_cash: number;
+  notes: string | null;
+  closed_by: string;
+  closed_at: string;
+  is_reconciled: boolean;
+  reconciled_at: string | null;
+  reconciled_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  box_product_sales: number;
+  oil_sales: number;
+  cash_on_hand_box: number;
+  cash_on_hand_oil: number;
+  cash_on_hand_perfume: number;
+}
+
+export interface Expense {
+  id: string;
+  title: string;
+  description: string | null;
+  amount: number;
+  type: string;
+  created_by: string;
+  date: string;
+  created_at: string | null;
+  updated_at: string | null;
+  receipt_url: string | null;
+  is_approved: boolean | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  is_payroll: boolean;
+  payroll_lines: Json;
+}
+
+export interface MonthlyBalanceClosing {
+  id: string;
+  month_start: string;
+  opening_box: number;
+  opening_oil: number;
+  opening_bank_deposit: number;
+  opening_petty_cash: number;
+  opening_total: number;
+  closing_box: number;
+  closing_oil: number;
+  closing_bank_deposit: number;
+  closing_petty_cash: number;
+  closing_total: number;
+  closing_perfume: number;
+  carried_from_month: string | null;
+  closed_by: string | null;
+  closed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VendorPurchase {
+  id: string;
+  vendor_name: string;
+  amount: number;
+  purchase_date: string;
+  notes: string | null;
+  invoice_reference: string | null;
+  receipt_url: string | null;
+  created_by: string;
+  created_at: string | null;
+  updated_at: string | null;
+  invoice_date: string | null;
+  received_date: string | null;
+  shipping_date: string | null;
+}
+
+export interface PriceOverride {
+  id: string;
+  product_id: string;
+  customer_phone: string;
+  custom_price: number;
+  reason: string | null;
+  applied_by: string;
+  applied_at: string | null;
+  is_active: boolean | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface MonthlyReportData {
+  dailyClosings: DailyClosing[];
+  expenses: Expense[];
+  monthlyBalanceClosings: MonthlyBalanceClosing[];
+  vendorPurchases: VendorPurchase[];
+  priceOverrides: PriceOverride[];
 }

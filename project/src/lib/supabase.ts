@@ -1,7 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 import { Database } from '../types/supabase';
 import { toMoneyNumber } from '../utils/stockUtils';
-import type { IncomingByProductSummary, UpcomingInvoice, UpcomingInvoiceLine, UpcomingInvoiceMatchStatus } from '../types';
+import type {
+  DailyClosing,
+  Expense,
+  IncomingByProductSummary,
+  MonthlyBalanceClosing,
+  MonthlyReportData,
+  PriceOverride,
+  UpcomingInvoice,
+  UpcomingInvoiceLine,
+  UpcomingInvoiceMatchStatus,
+  VendorPurchase
+} from '../types';
 
 const supabaseUrl = 'https://ljkvwaduqvacmrvycshj.supabase.co';
 const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxqa3Z3YWR1cXZhY21ydnljc2hqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MTE3MTgsImV4cCI6MjA2OTQ4NzcxOH0.fkbZbCF8KTK5aupvRRu6dCycIgB9N4BnnxZNZd3cz4Q';
@@ -1141,6 +1152,130 @@ export const getActivityLog = async () => {
     console.error('Error in getActivityLog:', error);
     return [];
   }
+};
+
+const normalizeMoneyFields = <T extends Record<string, unknown>>(
+  row: T,
+  fields: string[]
+): T => {
+  const normalized = { ...row };
+  fields.forEach((field) => {
+    if (field in normalized) {
+      normalized[field as keyof T] = toMoneyNumber(normalized[field as keyof T], 0) as T[keyof T];
+    }
+  });
+  return normalized;
+};
+
+type ReportQueryResult = {
+  data: Record<string, unknown>[] | null;
+  error: unknown;
+};
+
+type ReportQueryBuilder = PromiseLike<ReportQueryResult> & {
+  select: (columns: string) => ReportQueryBuilder;
+  gte: (column: string, value: string) => ReportQueryBuilder;
+  lt: (column: string, value: string) => ReportQueryBuilder;
+  eq: (column: string, value: string) => ReportQueryBuilder;
+  order: (column: string, options?: { ascending?: boolean }) => ReportQueryBuilder;
+};
+
+type ReportClient = {
+  from: (table: string) => ReportQueryBuilder;
+};
+
+export const getMonthlyReportData = async (
+  monthStart: string,
+  nextMonthStart: string
+): Promise<MonthlyReportData> => {
+  const client = supabase as unknown as ReportClient;
+
+  const [
+    dailyClosingsResult,
+    expensesResult,
+    monthlyBalanceResult,
+    vendorPurchasesResult,
+    priceOverridesResult
+  ] = await Promise.all([
+    client
+      .from('daily_closings')
+      .select('*')
+      .gte('date', monthStart)
+      .lt('date', nextMonthStart)
+      .order('date', { ascending: true }),
+    client
+      .from('expenses')
+      .select('*')
+      .gte('date', monthStart)
+      .lt('date', nextMonthStart)
+      .order('date', { ascending: true }),
+    client
+      .from('monthly_balance_closings')
+      .select('*')
+      .eq('month_start', monthStart)
+      .order('month_start', { ascending: true }),
+    client
+      .from('vendor_purchases')
+      .select('*')
+      .gte('purchase_date', monthStart)
+      .lt('purchase_date', nextMonthStart)
+      .order('purchase_date', { ascending: true }),
+    client
+      .from('price_overrides')
+      .select('*')
+      .gte('applied_at', monthStart)
+      .lt('applied_at', nextMonthStart)
+      .order('applied_at', { ascending: true })
+  ]);
+
+  const results = [
+    dailyClosingsResult,
+    expensesResult,
+    monthlyBalanceResult,
+    vendorPurchasesResult,
+    priceOverridesResult
+  ];
+  const failed = results.find((result) => result.error);
+  if (failed?.error) throw failed.error;
+
+  return {
+    dailyClosings: (dailyClosingsResult.data || []).map((row: Record<string, unknown>) =>
+      normalizeMoneyFields(row, [
+        'cash_on_hand',
+        'bank_deposit',
+        'petty_cash',
+        'box_product_sales',
+        'oil_sales',
+        'cash_on_hand_box',
+        'cash_on_hand_oil',
+        'cash_on_hand_perfume'
+      ])
+    ) as DailyClosing[],
+    expenses: (expensesResult.data || []).map((row: Record<string, unknown>) =>
+      normalizeMoneyFields(row, ['amount'])
+    ) as Expense[],
+    monthlyBalanceClosings: (monthlyBalanceResult.data || []).map((row: Record<string, unknown>) =>
+      normalizeMoneyFields(row, [
+        'opening_box',
+        'opening_oil',
+        'opening_bank_deposit',
+        'opening_petty_cash',
+        'opening_total',
+        'closing_box',
+        'closing_oil',
+        'closing_bank_deposit',
+        'closing_petty_cash',
+        'closing_total',
+        'closing_perfume'
+      ])
+    ) as MonthlyBalanceClosing[],
+    vendorPurchases: (vendorPurchasesResult.data || []).map((row: Record<string, unknown>) =>
+      normalizeMoneyFields(row, ['amount'])
+    ) as VendorPurchase[],
+    priceOverrides: (priceOverridesResult.data || []).map((row: Record<string, unknown>) =>
+      normalizeMoneyFields(row, ['custom_price'])
+    ) as PriceOverride[]
+  };
 };
 
 export const testConnection = async () => {
