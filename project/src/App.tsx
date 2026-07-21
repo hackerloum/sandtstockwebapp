@@ -287,6 +287,7 @@ function AppContent() {
       setOrders(prev => [...prev, { ...newOrder, items }]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create order');
+      throw err;
     }
   };
 

@@ -8,12 +8,13 @@ import {
   resolveOrderGrandTotal,
   resolveOrderItemsForDisplay
 } from '../utils/stockUtils';
+import { CreateOrderModal } from './OrderManagement/CreateOrderModal';
 
 interface OrderManagementProps {
   orders: Order[];
   products: Product[];
-  onAddOrder: (order: Order) => void;
-  onUpdateOrder: (order: Order) => void;
+  onAddOrder: (order: Order) => void | Promise<void>;
+  onUpdateOrder: (order: Order) => void | Promise<void>;
   onDeleteOrder: (id: string) => void;
   onUpdateProduct: (product: Product) => void;
 }
@@ -23,8 +24,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({
   products,
   onAddOrder,
   onUpdateOrder,
-  onDeleteOrder,
-  onUpdateProduct
+  onDeleteOrder
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -190,23 +190,11 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({
         <OrderForm
           order={editingOrder}
           products={products}
-          onSave={(order) => {
+          onSave={async (order) => {
             if (editingOrder) {
-              onUpdateOrder(order);
+              await onUpdateOrder(order);
             } else {
-              onAddOrder(order);
-              // Update product stock
-              order.items.forEach(item => {
-                const product = products.find(p => p.id === item.productId);
-                if (product) {
-                  const updatedProduct = {
-                    ...product,
-                    currentStock: Math.max(0, product.currentStock - item.quantity),
-                    updatedAt: new Date()
-                  };
-                  onUpdateProduct(updatedProduct);
-                }
-              });
+              await onAddOrder(order);
             }
             setShowOrderForm(false);
             setEditingOrder(null);
@@ -239,11 +227,15 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({
 interface OrderFormProps {
   order: Order | null;
   products: Product[];
-  onSave: (order: Order) => void;
+  onSave: (order: Order) => void | Promise<void>;
   onClose: () => void;
 }
 
 const OrderForm: React.FC<OrderFormProps> = ({ order, products, onSave, onClose }) => {
+  return <CreateOrderModal order={order} products={products} onSave={onSave} onClose={onClose} />;
+
+  /* Legacy form retained temporarily so this focused fix can merge independently
+     from the separate full-UI session that is editing this file. */
   const [formData, setFormData] = useState({
     customerName: order?.customer_name || '',
     customerEmail: order?.customer_email || '',
