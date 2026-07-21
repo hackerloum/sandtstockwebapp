@@ -33,6 +33,7 @@ import {
   deleteProduct,
   createStockMovement,
   createOrder,
+  getErrorMessage,
   updateOrder,
   createPurchaseOrder,
   ensureArgevilleSupplier,
@@ -301,8 +302,9 @@ function AppContent() {
       setOrders(prev => [...prev, savedOrder]);
       return savedOrder;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create order');
-      throw err;
+      const message = getErrorMessage(err) || 'Failed to create order';
+      setError(message);
+      throw new Error(message);
     }
   };
 

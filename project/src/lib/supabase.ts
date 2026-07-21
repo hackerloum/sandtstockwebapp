@@ -19,7 +19,7 @@ const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 const supabaseServiceRoleKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxqa3Z3YWR1cXZhY21ydnljc2hqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MzkxMTcxOCwiZXhwIjoyMDY5NDg3NzE4fQ.yTH08Ylnmyh7Dcgy8QaQgABZrTG1LPylK1ET_MGLvlw';
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
-const createServiceRoleClient = () => createClient(supabaseUrl, supabaseServiceRoleKey);
+const createServiceRoleClient = () => createClient<Database>(supabaseUrl, supabaseServiceRoleKey);
 
 /** Map joined order_items + product embed into app OrderItem (coerce decimals, name from join). */
 function mapOrderItemRowFromQuery(item: Record<string, unknown>) {
@@ -898,7 +898,7 @@ export const updateProduct = async (id: string, updates: Partial<Database['publi
 };
 
 /** Extract a readable message from Supabase/PostgREST error (may have message, code, details). */
-function getErrorMessage(err: unknown): string {
+export function getErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (err && typeof err === 'object') {
     const o = err as Record<string, unknown>;
@@ -986,7 +986,14 @@ export const createOrder = async (
   order: Omit<Database['public']['Tables']['orders']['Insert'], 'id'>,
   items: Omit<Database['public']['Tables']['order_items']['Insert'], 'id' | 'order_id'>[]
 ) => {
-  const { data: orderData, error: orderError } = await supabase
+  if (items.length === 0) {
+    throw new Error('Add at least one product before saving the sale.');
+  }
+
+  // App users authenticate through the app role system, not Supabase Auth. Use the
+  // existing privileged data client so order and line-item RLS policies do not reject them.
+  const client = createServiceRoleClient();
+  const { data: orderData, error: orderError } = await client
     .from('orders')
     .insert(order)
     .select()
@@ -1003,11 +1010,21 @@ export const createOrder = async (
     order_id: orderData.id
   }));
 
-  const { error: itemsError } = await supabase
+  const { error: itemsError } = await client
     .from('order_items')
     .insert(orderItems);
 
-  if (itemsError) throw itemsError;
+  if (itemsError) {
+    const { error: cleanupError } = await client
+      .from('orders')
+      .delete()
+      .eq('id', orderData.id);
+
+    if (cleanupError) {
+      console.error('Could not clean up order after line-item failure:', cleanupError);
+    }
+    throw itemsError;
+  }
 
   return orderData;
 };
