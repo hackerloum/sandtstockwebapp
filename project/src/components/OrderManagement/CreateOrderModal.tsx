@@ -25,6 +25,16 @@ interface CreateOrderModalProps {
   onClose: () => void;
 }
 
+const normalizeSearchValue = (value: unknown) => String(value ?? '')
+  .normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .trim()
+  .toLocaleLowerCase();
+
+const getProductName = (product: Product) =>
+  String(product.commercial_name ?? product.code ?? product.item_number ?? 'Unnamed product').trim()
+  || 'Unnamed product';
+
 const searchableProductText = (product: Product) => [
   product.commercial_name,
   product.code,
@@ -32,7 +42,7 @@ const searchableProductText = (product: Product) => [
   product.category,
   product.product_type
 ]
-  .map((value) => String(value ?? '').trim().toLocaleLowerCase())
+  .map(normalizeSearchValue)
   .filter(Boolean)
   .join(' ');
 
@@ -70,9 +80,8 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
   );
 
   const productResults = useMemo(() => {
-    const terms = productQuery
-      .trim()
-      .toLocaleLowerCase()
+    const normalizedQuery = normalizeSearchValue(productQuery);
+    const terms = normalizedQuery
       .split(/\s+/)
       .filter(Boolean);
 
@@ -84,7 +93,14 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
       .sort((a, b) => {
         const aAvailable = a.current_stock > 0 ? 0 : 1;
         const bAvailable = b.current_stock > 0 ? 0 : 1;
-        return aAvailable - bAvailable || a.commercial_name.localeCompare(b.commercial_name);
+        if (aAvailable !== bAvailable) return aAvailable - bAvailable;
+
+        const aName = normalizeSearchValue(a.commercial_name);
+        const bName = normalizeSearchValue(b.commercial_name);
+        const aStartsWithQuery = normalizedQuery !== '' && aName.startsWith(normalizedQuery) ? 0 : 1;
+        const bStartsWithQuery = normalizedQuery !== '' && bName.startsWith(normalizedQuery) ? 0 : 1;
+        return aStartsWithQuery - bStartsWithQuery
+          || getProductName(a).localeCompare(getProductName(b));
       });
   }, [productQuery, products]);
 
@@ -117,7 +133,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
 
       return [...current, {
         product_id: product.id,
-        product_name: product.commercial_name,
+        product_name: getProductName(product),
         quantity: 1,
         unit_price: product.price,
         total_price: product.price
@@ -235,7 +251,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                     className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-gray-100 px-4 py-3 text-left last:border-b-0 hover:bg-gray-50 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:opacity-60"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-gray-950 sm:text-base">{product.commercial_name}</p>
+                      <p className="truncate text-sm font-medium text-gray-950 sm:text-base">{getProductName(product)}</p>
                       <p className="mt-0.5 truncate text-xs text-gray-500">
                         {[product.code, product.item_number].filter(Boolean).join(' · ') || 'No product code'}
                         {' · '}{outOfStock ? 'Out of stock' : `${product.current_stock} available`}
