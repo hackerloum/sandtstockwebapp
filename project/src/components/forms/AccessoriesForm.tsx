@@ -179,8 +179,8 @@ export const AccessoriesForm: React.FC<AccessoriesFormProps> = ({
     >
       <form className="space-y-6">
         {/* Initial Stock Section */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-blue-900 mb-4">Initial Stock Information</h3>
+        <section className="border-b border-gray-200 pb-6">
+          <h3 className="mb-4 text-base font-semibold text-gray-900">Initial stock</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField label="Initial Stock Quantity" required>
               <Input
@@ -206,11 +206,11 @@ export const AccessoriesForm: React.FC<AccessoriesFormProps> = ({
               />
             </FormField>
           </div>
-        </div>
+        </section>
 
         {/* Accessory Details */}
-        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-purple-900 mb-4">Accessory Details</h3>
+        <section className="border-b border-gray-200 pb-6">
+          <h3 className="mb-4 text-base font-semibold text-gray-900">Accessory details</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <FormField label="Code Name" required>
               <div className="relative">
@@ -291,11 +291,11 @@ export const AccessoriesForm: React.FC<AccessoriesFormProps> = ({
               />
             </FormField>
           </div>
-        </div>
+        </section>
 
         {/* Specifications */}
-        <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-orange-900 mb-4">Specifications</h3>
+        <section className="border-b border-gray-200 pb-6">
+          <h3 className="mb-4 text-base font-semibold text-gray-900">Specifications</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <FormField label="Weight (kg)" required>
               <Input
@@ -332,7 +332,7 @@ export const AccessoriesForm: React.FC<AccessoriesFormProps> = ({
               <p className="text-sm text-gray-600 mt-1">Capacity in milliliters</p>
             </FormField>
           </div>
-        </div>
+        </section>
 
         {/* Additional Information */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -364,8 +364,8 @@ export const AccessoriesForm: React.FC<AccessoriesFormProps> = ({
         </div>
 
         {/* Stock Management */}
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Stock Management Settings</h3>
+        <section>
+          <h3 className="mb-4 text-base font-semibold text-gray-900">Stock settings</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <FormField label="Minimum Stock Level">
               <Input
@@ -400,8 +400,8 @@ export const AccessoriesForm: React.FC<AccessoriesFormProps> = ({
               <p className="text-sm text-gray-600 mt-1">When to reorder stock</p>
             </FormField>
           </div>
-        </div>
+        </section>
       </form>
     </Modal>
   );
-}; 
+};

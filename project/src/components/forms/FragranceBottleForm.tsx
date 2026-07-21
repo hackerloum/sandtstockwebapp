@@ -194,8 +194,8 @@ export const FragranceBottleForm: React.FC<FragranceBottleFormProps> = ({
     >
       <form className="space-y-6">
         {/* Stock Information */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-blue-900 mb-4">
+        <section className="border-b border-gray-200 pb-6">
+          <h3 className="mb-4 text-base font-semibold text-gray-900">
             {product ? 'Current Stock Information' : 'Initial Stock Information'}
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -228,11 +228,11 @@ export const FragranceBottleForm: React.FC<FragranceBottleFormProps> = ({
               />
             </FormField>
           </div>
-        </div>
+        </section>
 
         {/* Fragrance Details */}
-        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-purple-900 mb-4">Fragrance Details</h3>
+        <section className="border-b border-gray-200 pb-6">
+          <h3 className="mb-4 text-base font-semibold text-gray-900">Fragrance details</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField label="Code Name" required>
               <div className="relative">
@@ -302,7 +302,7 @@ export const FragranceBottleForm: React.FC<FragranceBottleFormProps> = ({
 
 
 
-        </div>
+        </section>
 
 
 
@@ -381,8 +381,8 @@ export const FragranceBottleForm: React.FC<FragranceBottleFormProps> = ({
         </div>
 
         {/* Stock Management */}
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Stock Management Settings</h3>
+        <section>
+          <h3 className="mb-4 text-base font-semibold text-gray-900">Stock settings</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <FormField label="Minimum Stock Level">
               <Input
@@ -417,8 +417,8 @@ export const FragranceBottleForm: React.FC<FragranceBottleFormProps> = ({
               <p className="text-sm text-gray-600 mt-1">When to reorder stock</p>
             </FormField>
           </div>
-        </div>
+        </section>
       </form>
     </Modal>
   );
-}; 
+};

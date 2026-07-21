@@ -41,39 +41,37 @@ export const ProductReportForm: React.FC<ProductReportFormProps> = ({ products, 
     }
   };
 
-  const handleChange = (field: string, value: any) => {
+  const handleChange = (field: keyof typeof formData, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
   if (success) {
     return (
-      <PageContainer>
-        <PageHeader title="Report Submitted" icon={CheckCircle} />
-        <PageSection>
-          <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
-            <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-green-800 mb-2">
-              Report Submitted Successfully
-            </h3>
-            <p className="text-green-600">
-              Your product report has been submitted and will be reviewed by an administrator.
-            </p>
-          </div>
-        </PageSection>
-      </PageContainer>
+      <div className="space-y-5">
+        <PageHeader title="Report submitted" onBack={onBack} />
+        <PageContainer>
+          <PageSection>
+            <div className="py-8 text-center">
+              <CheckCircle className="mx-auto mb-4 h-10 w-10 text-emerald-600" />
+              <h3 className="text-lg font-medium text-gray-900">Report submitted successfully</h3>
+              <p className="mt-2 text-sm text-gray-500">The request is ready for administrator review.</p>
+            </div>
+          </PageSection>
+        </PageContainer>
+      </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <PageHeader
-        title="Submit Product Report"
-        description="Request to add or remove products from inventory"
-        icon={Package}
+        title="New product report"
+        subtitle="Request an inventory addition or removal"
+        onBack={onBack}
       />
 
       <PageContainer>
-        <PageSection>
+        <PageSection title="Request details">
           <div className="max-w-2xl mx-auto">
             <form onSubmit={handleSubmit} className="space-y-6">
               {/* Report Type */}
@@ -81,40 +79,28 @@ export const ProductReportForm: React.FC<ProductReportFormProps> = ({ products, 
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Report Type
                 </label>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => handleChange('report_type', 'add')}
-                    className={`p-4 rounded-lg border-2 transition-colors ${
+                    className={`rounded-md border px-3 py-3 text-sm font-medium transition-colors ${
                       formData.report_type === 'add'
-                        ? 'border-green-500 bg-green-50 text-green-700'
+                        ? 'border-emerald-600 bg-emerald-50 text-emerald-800'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
-                    <div className="flex items-center space-x-3">
-                      <Plus className="w-5 h-5" />
-                      <div className="text-left">
-                        <div className="font-medium">Add Product</div>
-                        <div className="text-sm text-gray-500">Request to add new products</div>
-                      </div>
-                    </div>
+                    <span className="flex items-center justify-center gap-2"><Plus className="h-4 w-4" /> Add product</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => handleChange('report_type', 'remove')}
-                    className={`p-4 rounded-lg border-2 transition-colors ${
+                    className={`rounded-md border px-3 py-3 text-sm font-medium transition-colors ${
                       formData.report_type === 'remove'
                         ? 'border-red-500 bg-red-50 text-red-700'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
-                    <div className="flex items-center space-x-3">
-                      <Package className="w-5 h-5" />
-                      <div className="text-left">
-                        <div className="font-medium">Remove Product</div>
-                        <div className="text-sm text-gray-500">Request to remove products</div>
-                      </div>
-                    </div>
+                    <span className="flex items-center justify-center gap-2"><Package className="h-4 w-4" /> Remove product</span>
                   </button>
                 </div>
               </div>
@@ -190,7 +176,7 @@ export const ProductReportForm: React.FC<ProductReportFormProps> = ({ products, 
               )}
 
               {/* Submit Buttons */}
-              <div className="flex justify-end space-x-3">
+              <div className="flex flex-col-reverse gap-2 border-t border-gray-200 pt-5 sm:flex-row sm:justify-end">
                 <Button
                   type="button"
                   variant="secondary"
@@ -203,7 +189,7 @@ export const ProductReportForm: React.FC<ProductReportFormProps> = ({ products, 
                   variant="primary"
                   disabled={loading || !formData.product_id || !formData.reason}
                 >
-                  {loading ? 'Submitting...' : 'Submit Report'}
+                  {loading ? 'Submitting...' : 'Submit report'}
                 </Button>
               </div>
             </form>
@@ -212,4 +198,4 @@ export const ProductReportForm: React.FC<ProductReportFormProps> = ({ products, 
       </PageContainer>
     </div>
   );
-}; 
+};

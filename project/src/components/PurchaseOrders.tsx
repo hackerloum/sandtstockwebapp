@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { Plus, Search, Eye, Edit2, Trash2, FileText, Package } from 'lucide-react';
+import { Plus, Search, Eye, Edit2, Trash2, FileText, Package, X } from 'lucide-react';
 import { PurchaseOrder, Product, Supplier, PurchaseOrderItem } from '../types';
 import { generateId, formatCurrency, formatDate } from '../utils/stockUtils';
 import { useAuth } from '../contexts/AuthContext';
 import { PageHeader } from './shared/PageLayout';
+import { Button } from './shared/Button';
+import { Modal } from './shared/Modal';
 
 interface PurchaseOrdersProps {
   purchaseOrders: PurchaseOrder[];
@@ -362,15 +364,21 @@ const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900">
-            {po ? 'Edit Purchase Order' : 'Create Purchase Order'}
-          </h2>
-        </div>
-
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+    <Modal
+      isOpen
+      onClose={onClose}
+      title={po ? `Edit ${po.poNumber}` : 'New purchase order'}
+      size="xl"
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button type="submit" form="purchase-order-form" disabled={!formData.supplierId || poItems.length === 0}>
+            {po ? 'Update order' : 'Create order'}
+          </Button>
+        </>
+      }
+    >
+        <form id="purchase-order-form" onSubmit={handleSubmit} className="space-y-6">
           {/* Supplier and Date */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -399,8 +407,8 @@ const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
           </div>
 
           {/* Add Items */}
-          <div className="border border-gray-200 rounded-lg p-4">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Purchase Order Items</h3>
+          <section className="border-t border-gray-200 pt-5">
+            <h3 className="mb-4 text-base font-semibold text-gray-900">Items</h3>
             
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
               <select
@@ -415,7 +423,7 @@ const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
                 <option value="">Select product</option>
                 {products.map(product => (
                   <option key={product.id} value={product.id}>
-                    {product.name} - {formatCurrency(product.price)}
+                    {product.commercial_name} - {formatCurrency(product.price)}
                   </option>
                 ))}
               </select>
@@ -440,7 +448,7 @@ const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
                 type="button"
                 onClick={addItem}
                 disabled={!selectedProduct}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-lg transition-colors"
+                className="rounded-md bg-emerald-700 px-4 py-2 font-medium text-white transition-colors hover:bg-emerald-800 disabled:bg-gray-300"
               >
                 Add
               </button>
@@ -450,12 +458,12 @@ const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
             {poItems.length > 0 && (
               <div className="space-y-2">
                 {poItems.map((item) => (
-                  <div key={item.productId} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <div>
+                  <div key={item.productId} className="flex flex-col gap-2 border-t border-gray-100 py-3 first:border-t-0 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
                       <span className="font-medium">{item.productName}</span>
                       <span className="text-gray-600 ml-2">x{item.quantity} @ {formatCurrency(item.unitPrice)}</span>
                     </div>
-                    <div className="flex items-center space-x-3">
+                    <div className="flex items-center justify-between gap-3 sm:justify-end">
                       <span className="font-medium">{formatCurrency(item.totalPrice)}</span>
                       <button
                         type="button"
@@ -472,7 +480,7 @@ const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
                 </div>
               </div>
             )}
-          </div>
+          </section>
 
           {/* Notes */}
           <div>
@@ -485,25 +493,8 @@ const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
             />
           </div>
 
-          <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={!formData.supplierId || poItems.length === 0}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-lg transition-colors"
-            >
-              {po ? 'Update PO' : 'Create PO'}
-            </button>
-          </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 };
 
@@ -541,30 +532,33 @@ const PurchaseOrderDetail: React.FC<PurchaseOrderDetailProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200">
+    <div className="fixed inset-0 z-50 !mt-0 flex items-end justify-center bg-gray-950/55 sm:items-center sm:p-4">
+      <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-md bg-white shadow-2xl sm:max-w-2xl sm:rounded-md">
+        <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-4 py-4 sm:px-6">
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-gray-900">Purchase Order Details</h2>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-              ×
+            <div>
+              <h2 className="text-lg font-semibold text-gray-950">{po.poNumber}</h2>
+              <p className="text-sm text-gray-500">Purchase order details</p>
+            </div>
+            <button type="button" onClick={onClose} className="inline-flex h-9 w-9 items-center justify-center rounded-md text-xl text-gray-400 hover:bg-gray-100 hover:text-gray-600" aria-label="Close">
+              <X className="h-5 w-5" />
             </button>
           </div>
         </div>
 
-        <div className="p-6 space-y-6">
+        <div className="space-y-6 p-4 sm:p-6">
           {/* PO Info */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <p className="text-sm font-medium text-gray-700">PO Number</p>
-              <p className="text-lg font-semibold text-gray-900">{po.poNumber}</p>
+              <p className="text-xs font-medium uppercase text-gray-500">PO number</p>
+              <p className="mt-1 text-lg font-semibold text-gray-900">{po.poNumber}</p>
             </div>
             <div>
-              <p className="text-sm font-medium text-gray-700">Status</p>
+              <p className="text-xs font-medium uppercase text-gray-500">Status</p>
               <select
                 value={po.status}
                 onChange={(e) => onUpdateStatus(po.id, e.target.value)}
-                className="mt-1 px-3 py-1 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm font-medium capitalize focus:border-emerald-600 focus:ring-emerald-600"
               >
                 <option value="draft">Draft</option>
                 <option value="sent">Sent</option>
@@ -576,32 +570,35 @@ const PurchaseOrderDetail: React.FC<PurchaseOrderDetailProps> = ({
           </div>
 
           {/* Supplier Info */}
-          <div>
-            <h3 className="text-lg font-medium text-gray-900 mb-3">Supplier Information</h3>
-            <div className="bg-gray-50 rounded-lg p-4">
-              <p className="font-medium">{po.supplierName}</p>
-              <p className="text-sm text-gray-600">Order Date: {formatDate(po.orderDate)}</p>
+          <section className="border-t border-gray-200 pt-5">
+            <h3 className="text-sm font-semibold text-gray-900">Supplier</h3>
+            <div className="mt-3">
+              <p className="font-medium text-gray-900">{po.supplierName}</p>
+              <p className="mt-1 text-sm text-gray-600">Ordered {formatDate(po.orderDate)}</p>
               {po.expectedDeliveryDate && (
-                <p className="text-sm text-gray-600">Expected: {formatDate(po.expectedDeliveryDate)}</p>
+                <p className="mt-1 text-sm text-gray-600">Expected {formatDate(po.expectedDeliveryDate)}</p>
               )}
             </div>
-          </div>
+          </section>
 
           {/* PO Items */}
-          <div>
-            <h3 className="text-lg font-medium text-gray-900 mb-3">Items</h3>
-            <div className="space-y-2">
+          <section className="border-t border-gray-200 pt-5">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-900">Items</h3>
+              <span className="text-sm text-gray-500">{po.items.length} products</span>
+            </div>
+            <div className="divide-y divide-gray-100 rounded-md border border-gray-200">
               {po.items.map((item) => (
-                <div key={item.productId} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                  <div className="flex-1">
-                    <p className="font-medium">{item.productName}</p>
-                    <p className="text-sm text-gray-600">
+                <div key={item.productId} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-gray-900">{item.productName}</p>
+                    <p className="mt-0.5 text-xs text-gray-500">
                       Ordered: {item.quantity} × {formatCurrency(item.unitPrice)}
                     </p>
                   </div>
                   {po.status === 'confirmed' && (
-                    <div className="flex items-center space-x-2">
-                      <span className="text-sm text-gray-600">Received:</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-600">Received</span>
                       <input
                         type="number"
                         value={receivedQuantities[item.productId] || 0}
@@ -615,33 +612,34 @@ const PurchaseOrderDetail: React.FC<PurchaseOrderDetailProps> = ({
                       />
                     </div>
                   )}
-                  <p className="font-medium ml-4">{formatCurrency(item.totalPrice)}</p>
+                  <p className="text-sm font-semibold text-gray-900">{formatCurrency(item.totalPrice)}</p>
                 </div>
               ))}
-              <div className="text-right pt-2 border-t border-gray-200">
-                <p className="text-xl font-bold">Total: {formatCurrency(po.totalAmount)}</p>
+              <div className="flex items-end justify-between border-t border-gray-200 px-4 py-4">
+                <p className="text-sm text-gray-500">Order total</p>
+                <p className="text-xl font-semibold text-gray-950">{formatCurrency(po.totalAmount)}</p>
               </div>
             </div>
-          </div>
+          </section>
 
           {po.notes && (
-            <div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Notes</h3>
-              <p className="text-gray-600 bg-gray-50 rounded-lg p-3">{po.notes}</p>
-            </div>
+            <section className="border-t border-gray-200 pt-5">
+              <h3 className="text-sm font-semibold text-gray-900">Notes</h3>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-600">{po.notes}</p>
+            </section>
           )}
 
-          <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+          <div className="flex flex-col-reverse gap-2 border-t border-gray-200 pt-4 sm:flex-row sm:justify-end">
             <button
               onClick={onClose}
-              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
+              className="rounded-md border border-gray-300 px-4 py-2 font-medium text-gray-700 transition-colors hover:bg-gray-50"
             >
               Close
             </button>
             {po.status === 'confirmed' && (
               <button
                 onClick={handleReceive}
-                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+                className="rounded-md bg-emerald-700 px-4 py-2 font-medium text-white transition-colors hover:bg-emerald-800"
               >
                 Mark as Received
               </button>

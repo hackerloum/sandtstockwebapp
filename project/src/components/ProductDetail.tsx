@@ -1,231 +1,187 @@
 import React from 'react';
-import { X, Package, DollarSign, User, Calendar } from 'lucide-react';
+import { CalendarDays, Edit2, Package, Truck, Weight } from 'lucide-react';
 import { Product } from '../types';
-import { getStockStatus, getStockStatusColor, getStatusText } from '../utils/stockUtils';
+import { formatCurrency, getStockStatus, getStatusText } from '../utils/stockUtils';
+import { Button } from './shared/Button';
+import { Modal } from './shared/Modal';
 
 interface ProductDetailProps {
   product: Product | null;
   isOpen: boolean;
   onClose: () => void;
+  onEdit?: (product: Product) => void;
 }
+
+interface ExtendedProduct extends Product {
+  brand?: { name: string } | null;
+  supplier?: { name: string } | null;
+}
+
+const displayDate = (value: string | null | undefined) => {
+  if (!value) return 'Not recorded';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Not recorded';
+  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
+const statusClasses: Record<string, string> = {
+  out: 'border-red-200 bg-red-50 text-red-700',
+  low: 'border-amber-200 bg-amber-50 text-amber-700',
+  high: 'border-blue-200 bg-blue-50 text-blue-700',
+  ok: 'border-emerald-200 bg-emerald-50 text-emerald-700'
+};
+
+const DetailItem = ({ label, value }: { label: string; value: React.ReactNode }) => (
+  <div className="min-w-0">
+    <dt className="text-xs font-medium uppercase text-gray-500">{label}</dt>
+    <dd className="mt-1 break-words text-sm font-medium text-gray-900">{value || 'Not set'}</dd>
+  </div>
+);
 
 export const ProductDetail: React.FC<ProductDetailProps> = ({
   product,
   isOpen,
-  onClose
+  onClose,
+  onEdit
 }) => {
-  if (!isOpen || !product) return null;
+  if (!product) return null;
 
+  const extendedProduct = product as ExtendedProduct;
   const status = getStockStatus(product);
-  const statusColor = getStockStatusColor(status);
-  const statusText = getStatusText(status);
+  const stock = Number(product.current_stock || 0);
+  const minimum = Number(product.min_stock || 0);
+  const maximum = Number(product.max_stock || 0);
+  const stockValue = stock * Number(product.price || 0);
+  const stockPercent = maximum > 0 ? Math.min(Math.max((stock / maximum) * 100, 0), 100) : 0;
+  const season = Array.isArray(product.season) && product.season.length ? product.season.join(', ') : 'Not set';
+
+  const handleEdit = () => {
+    onClose();
+    onEdit?.(product);
+  };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900">Product Details</h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 p-1"
-          >
-            <X className="w-6 h-6" />
-          </button>
-        </div>
-
-        <div className="p-6 space-y-6">
-          <div className="flex items-start justify-between">
-            <div>
-              <h3 className="text-2xl font-bold text-gray-900 mb-2">{product.commercial_name}</h3>
-              <p className="text-gray-600">{product.category || 'N/A'}</p>
-              {product.product_type && (
-                <p className="text-sm text-blue-600 font-medium">{product.product_type}</p>
-              )}
-            </div>
-            <span className={`inline-flex px-3 py-1 text-sm font-medium rounded-full border ${statusColor}`}>
-              {statusText}
-            </span>
-          </div>
-
-          {product.fragrance_notes && (
-            <div>
-              <h4 className="text-sm font-medium text-gray-700 mb-2">Fragrance Notes</h4>
-              <p className="text-gray-600">{product.fragrance_notes}</p>
-            </div>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Product details"
+      size="xl"
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>Close</Button>
+          {onEdit && (
+            <Button icon={<Edit2 className="h-4 w-4" />} onClick={handleEdit}>Edit product</Button>
           )}
-
-          {/* Product Specifications */}
-          <div className="bg-gray-50 rounded-lg p-4">
-            <h4 className="text-sm font-medium text-gray-700 mb-3">Product Specifications</h4>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-xs text-gray-500">Product Code</p>
-                <p className="text-sm font-medium">{product.code}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Item Number</p>
-                <p className="text-sm font-medium">{product.item_number}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Size</p>
-                <p className="text-sm font-medium">{product.size}ml</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Brand</p>
-                <p className="text-sm font-medium">{product.brand?.name || product.brand_id || 'N/A'}</p>
-              </div>
-              {product.concentration && (
-                <div>
-                  <p className="text-xs text-gray-500">Concentration</p>
-                  <p className="text-sm font-medium">{product.concentration}</p>
-                </div>
-              )}
-              {product.gender && (
-                <div>
-                  <p className="text-xs text-gray-500">Gender</p>
-                  <p className="text-sm font-medium">{product.gender}</p>
-                </div>
-              )}
-              {product.season && (
-                <div>
-                  <p className="text-xs text-gray-500">Season</p>
-                  <p className="text-sm font-medium">{product.season}</p>
-                </div>
-              )}
-              {product.is_tester && (
-                <div>
-                  <p className="text-xs text-gray-500">Tester</p>
-                  <p className="text-sm font-medium text-orange-600">Yes</p>
-                </div>
-              )}
-            </div>
-            
-            {/* Weight details for Fragrance Bottles */}
-            {product.product_type === 'Fragrance Bottles' && product.gross_weight && product.tare_weight && product.net_weight && (
-              <div className="mt-4 pt-4 border-t border-gray-200">
-                <h5 className="text-xs font-medium text-gray-700 mb-2">Weight Specifications</h5>
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <p className="text-xs text-gray-500">Gross Weight</p>
-                    <p className="text-sm font-medium">{product.gross_weight}g</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Tare Weight</p>
-                    <p className="text-sm font-medium">{product.tare_weight}g</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Net Weight</p>
-                    <p className="text-sm font-medium">{product.net_weight}g</p>
-                  </div>
-                </div>
-              </div>
-            )}
+        </>
+      }
+    >
+      <div className="space-y-6">
+        <section className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <h2 className="break-words text-xl font-semibold text-gray-950 sm:text-2xl">{product.commercial_name}</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              {[product.code, product.item_number].filter(Boolean).join(' · ')}
+            </p>
+            <p className="mt-2 text-sm text-gray-600">
+              {[product.product_type, product.category].filter(Boolean).join(' · ')}
+            </p>
           </div>
+          <span className={`inline-flex w-fit shrink-0 items-center rounded border px-2.5 py-1 text-xs font-medium ${statusClasses[status] || statusClasses.ok}`}>
+            {getStatusText(status)}
+          </span>
+        </section>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-4">
-              <div className="flex items-center space-x-3">
-                <Package className="w-5 h-5 text-blue-500" />
-                <div>
-                  <p className="text-sm font-medium text-gray-700">Stock Information</p>
-                  <p className="text-lg font-semibold text-gray-900">
-                    {product.current_stock} / {product.max_stock || 'N/A'} units
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    Minimum: {product.min_stock || 'N/A'} units
-                  </p>
-                </div>
-              </div>
+        <section className="grid grid-cols-2 overflow-hidden rounded-md border border-gray-200 sm:grid-cols-3">
+          <div className="border-b border-r border-gray-200 p-4 sm:border-b-0">
+            <p className="text-xs font-medium uppercase text-gray-500">Current stock</p>
+            <p className="mt-1 text-xl font-semibold text-gray-950">{stock}</p>
+          </div>
+          <div className="border-b border-gray-200 p-4 sm:border-b-0 sm:border-r">
+            <p className="text-xs font-medium uppercase text-gray-500">Unit price</p>
+            <p className="mt-1 truncate text-base font-semibold text-gray-950" title={formatCurrency(product.price || 0)}>
+              {formatCurrency(product.price || 0)}
+            </p>
+          </div>
+          <div className="col-span-2 p-4 sm:col-span-1">
+            <p className="text-xs font-medium uppercase text-gray-500">Stock value</p>
+            <p className="mt-1 truncate text-base font-semibold text-gray-950" title={formatCurrency(stockValue)}>
+              {formatCurrency(stockValue)}
+            </p>
+          </div>
+        </section>
 
-              <div className="flex items-center space-x-3">
-                <User className="w-5 h-5 text-green-500" />
-                <div>
-                  <p className="text-sm font-medium text-gray-700">Supplier</p>
-                  <p className="text-lg font-semibold text-gray-900">
-                    {product.supplier?.name || 'Argeville'}
-                  </p>
-                </div>
-              </div>
+        <section>
+          <h3 className="text-sm font-semibold text-gray-950">Product information</h3>
+          <dl className="mt-3 grid grid-cols-2 gap-x-5 gap-y-5 sm:grid-cols-3">
+            <DetailItem label="Brand" value={extendedProduct.brand?.name || product.brand_id || 'Not set'} />
+            <DetailItem label="Supplier" value={extendedProduct.supplier?.name || 'Argeville'} />
+            <DetailItem label="Size" value={product.size ? `${product.size} ml` : 'Not set'} />
+            <DetailItem label="Concentration" value={product.concentration || 'Not set'} />
+            <DetailItem label="Gender" value={product.gender || 'Not set'} />
+            <DetailItem label="Season" value={season} />
+            <DetailItem label="Tester" value={product.is_tester ? 'Yes' : 'No'} />
+            <DetailItem label="Reorder point" value={`${Number(product.reorder_point || 0)} units`} />
+          </dl>
+        </section>
+
+        {product.fragrance_notes && (
+          <section className="border-t border-gray-200 pt-5">
+            <h3 className="text-sm font-semibold text-gray-950">Description and notes</h3>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-600">{product.fragrance_notes}</p>
+          </section>
+        )}
+
+        <section className="border-t border-gray-200 pt-5">
+          <div className="flex items-center gap-2">
+            <Package className="h-4 w-4 text-gray-500" />
+            <h3 className="text-sm font-semibold text-gray-950">Inventory levels</h3>
+          </div>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-gray-200">
+            <div
+              className={`h-full rounded-full ${status === 'out' ? 'bg-red-500' : status === 'low' ? 'bg-amber-500' : 'bg-emerald-600'}`}
+              style={{ width: `${stockPercent}%` }}
+            />
+          </div>
+          <dl className="mt-4 grid grid-cols-3 gap-3">
+            <DetailItem label="Minimum" value={`${minimum} units`} />
+            <DetailItem label="Current" value={`${stock} units`} />
+            <DetailItem label="Maximum" value={maximum ? `${maximum} units` : 'Not set'} />
+          </dl>
+        </section>
+
+        {product.product_type === 'Fragrance Bottles' && (
+          <section className="border-t border-gray-200 pt-5">
+            <div className="flex items-center gap-2">
+              <Weight className="h-4 w-4 text-gray-500" />
+              <h3 className="text-sm font-semibold text-gray-950">Weight</h3>
             </div>
+            <dl className="mt-4 grid grid-cols-3 gap-3">
+              <DetailItem label="Gross" value={`${Number(product.gross_weight || 0)} kg`} />
+              <DetailItem label="Tare" value={`${Number(product.tare_weight || 0)} kg`} />
+              <DetailItem label="Net" value={`${Number(product.net_weight || 0)} kg`} />
+            </dl>
+          </section>
+        )}
 
-            <div className="space-y-4">
-              <div className="flex items-center space-x-3">
-                <DollarSign className="w-5 h-5 text-yellow-500" />
-                <div>
-                  <p className="text-sm font-medium text-gray-700">Pricing</p>
-                  <p className="text-lg font-semibold text-gray-900">
-                    ${product.price?.toFixed(2) || '0.00'} per unit
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    Total value: ${((product.current_stock || 0) * (product.price || 0)).toFixed(2)}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center space-x-3">
-                <Calendar className="w-5 h-5 text-purple-500" />
-                <div>
-                  <p className="text-sm font-medium text-gray-700">Last Updated</p>
-                  <p className="text-lg font-semibold text-gray-900">
-                    {product.updated_at ? new Date(product.updated_at).toLocaleDateString() : 'N/A'}
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    Created: {product.created_at ? new Date(product.created_at).toLocaleDateString() : 'N/A'}
-                  </p>
-                </div>
-              </div>
+        <section className="grid gap-4 border-t border-gray-200 pt-5 sm:grid-cols-2">
+          <div className="flex items-start gap-3">
+            <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-gray-500" />
+            <div>
+              <p className="text-xs font-medium uppercase text-gray-500">Updated</p>
+              <p className="mt-1 text-sm font-medium text-gray-900">{displayDate(product.updated_at)}</p>
+              <p className="mt-1 text-xs text-gray-500">Created {displayDate(product.created_at)}</p>
             </div>
           </div>
-
-          <div className="bg-gray-50 rounded-lg p-4">
-            <h4 className="text-sm font-medium text-gray-700 mb-3">Stock Levels</h4>
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Current Stock</span>
-                <span className="font-medium">{product.current_stock || 0} units</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Minimum Stock</span>
-                <span className="font-medium">{product.min_stock || 'N/A'} units</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Maximum Stock</span>
-                <span className="font-medium">{product.max_stock || 'N/A'} units</span>
-              </div>
-              {product.max_stock && (
-                <div className="mt-3">
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                      className={`h-2 rounded-full ${
-                        status === 'out' ? 'bg-red-500' :
-                        status === 'low' ? 'bg-yellow-500' :
-                        status === 'high' ? 'bg-green-500' :
-                        'bg-blue-500'
-                      }`}
-                      style={{
-                        width: `${Math.min(((product.current_stock || 0) / product.max_stock) * 100, 100)}%`
-                      }}
-                    ></div>
-                  </div>
-                  <div className="flex justify-between text-xs text-gray-500 mt-1">
-                    <span>0</span>
-                    <span>{product.max_stock}</span>
-                  </div>
-                </div>
-              )}
+          <div className="flex items-start gap-3">
+            <Truck className="mt-0.5 h-4 w-4 shrink-0 text-gray-500" />
+            <div>
+              <p className="text-xs font-medium uppercase text-gray-500">Supply</p>
+              <p className="mt-1 text-sm font-medium text-gray-900">{extendedProduct.supplier?.name || 'Argeville'}</p>
+              <p className="mt-1 text-xs text-gray-500">Reorder at {Number(product.reorder_point || 0)} units</p>
             </div>
           </div>
-
-          <div className="flex justify-end pt-4 border-t border-gray-200">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
-            >
-              Close
-            </button>
-          </div>
-        </div>
+        </section>
       </div>
-    </div>
+    </Modal>
   );
 };

@@ -824,6 +824,7 @@ function AppContent() {
       <ProductDetail
         product={viewingProduct}
         isOpen={isProductDetailOpen}
+        onEdit={handleEditProduct}
         onClose={() => {
           setIsProductDetailOpen(false);
           setViewingProduct(null);

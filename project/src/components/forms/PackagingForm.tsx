@@ -193,8 +193,8 @@ export const PackagingForm: React.FC<PackagingFormProps> = ({
     >
       <form className="space-y-6">
         {/* Initial Stock Section */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-blue-900 mb-4">Initial Stock Information</h3>
+        <section className="border-b border-gray-200 pb-6">
+          <h3 className="mb-4 text-base font-semibold text-gray-900">Initial stock</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField label="Initial Stock Quantity" required>
               <Input
@@ -220,11 +220,11 @@ export const PackagingForm: React.FC<PackagingFormProps> = ({
               />
             </FormField>
           </div>
-        </div>
+        </section>
 
         {/* Packaging Details */}
-        <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-orange-900 mb-4">Packaging Details</h3>
+        <section className="border-b border-gray-200 pb-6">
+          <h3 className="mb-4 text-base font-semibold text-gray-900">Packaging details</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <FormField label="Code Name" required>
               <div className="relative">
@@ -305,11 +305,11 @@ export const PackagingForm: React.FC<PackagingFormProps> = ({
               />
             </FormField>
           </div>
-        </div>
+        </section>
 
         {/* Specifications */}
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-green-900 mb-4">Specifications</h3>
+        <section className="border-b border-gray-200 pb-6">
+          <h3 className="mb-4 text-base font-semibold text-gray-900">Specifications</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <FormField label="Weight (kg)" required>
               <Input
@@ -346,7 +346,7 @@ export const PackagingForm: React.FC<PackagingFormProps> = ({
               <p className="text-sm text-gray-600 mt-1">Number of items per package</p>
             </FormField>
           </div>
-        </div>
+        </section>
 
         {/* Additional Information */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -378,8 +378,8 @@ export const PackagingForm: React.FC<PackagingFormProps> = ({
         </div>
 
         {/* Stock Management */}
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Stock Management Settings</h3>
+        <section>
+          <h3 className="mb-4 text-base font-semibold text-gray-900">Stock settings</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <FormField label="Minimum Stock Level">
               <Input
@@ -414,8 +414,8 @@ export const PackagingForm: React.FC<PackagingFormProps> = ({
               <p className="text-sm text-gray-600 mt-1">When to reorder stock</p>
             </FormField>
           </div>
-        </div>
+        </section>
       </form>
     </Modal>
   );
-}; 
+};
