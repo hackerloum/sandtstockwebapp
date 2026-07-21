@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft } from 'lucide-react';
-import { Product, ProductType } from '../types';
-import { PageContainer, PageHeader } from './shared/PageLayout';
+import { Product } from '../types';
+import { PageHeader } from './shared/PageLayout';
 import { Button } from './shared/Button';
 import { FragranceBottleForm, CrimpForm, AccessoriesForm, PackagingForm } from './forms';
 
@@ -37,20 +36,16 @@ export const EditProductPage: React.FC<EditProductPageProps> = ({
 
   if (!product) {
     return (
-      <PageContainer>
+      <div className="space-y-5">
         <PageHeader
           title="Edit Product"
           subtitle="Select a product to edit"
-          backButton={
-            <Button variant="outline" onClick={onBack} icon={ArrowLeft}>
-              Back to Products
-            </Button>
-          }
+          onBack={onBack}
         />
-        <div className="text-center py-12">
+        <div className="rounded-md border border-gray-200 bg-white py-12 text-center">
           <p className="text-gray-500">No product selected for editing.</p>
         </div>
-      </PageContainer>
+      </div>
     );
   }
 
@@ -108,17 +103,13 @@ export const EditProductPage: React.FC<EditProductPageProps> = ({
   };
 
   return (
-    <PageContainer>
+    <div className="space-y-5">
       <PageHeader
         title={`Edit ${product.product_type || 'Product'}`}
         subtitle={`Editing: ${product.commercial_name} (${product.code})`}
-        backButton={
-          <Button variant="outline" onClick={onBack} icon={ArrowLeft}>
-            Back to Products
-          </Button>
-        }
+        onBack={onBack}
       />
       {renderForm()}
-    </PageContainer>
+    </div>
   );
-}; 
+};

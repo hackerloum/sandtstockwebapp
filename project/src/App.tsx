@@ -625,7 +625,7 @@ function AppContent() {
         </div>
       )}
 
-      <main className="mx-auto max-w-screen-2xl px-4 py-5 pb-28 sm:px-6 sm:py-7 lg:px-8 min-[1180px]:pb-8">
+      <main className="app-shell-main mx-auto max-w-screen-2xl px-4 py-5 pb-28 sm:px-6 sm:py-7 lg:px-8 min-[1180px]:pb-8">
         {activeTab === 'dashboard' && hasPermission('view_dashboard') && (
           <Dashboard
             products={products}

@@ -50,7 +50,7 @@ export const Modal: React.FC<ModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex min-h-screen items-center justify-center p-4 text-center sm:p-0">
+      <div className="flex min-h-full items-center justify-center p-4 text-center sm:p-6">
         <div
           className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
           onClick={closeOnClickOutside ? onClose : undefined}
@@ -58,8 +58,8 @@ export const Modal: React.FC<ModalProps> = ({
 
         <div
           className={`
-            relative transform overflow-hidden rounded-lg bg-white text-left
-            shadow-xl transition-all sm:my-8 w-full ${sizeClasses[size]}
+            relative max-h-[calc(100vh-2rem)] w-full transform overflow-y-auto rounded-md bg-white text-left
+            shadow-xl transition-all sm:my-8 ${sizeClasses[size]}
           `}
         >
           {/* Header */}
@@ -68,7 +68,7 @@ export const Modal: React.FC<ModalProps> = ({
               <h3 className="text-lg font-medium text-gray-900">{title}</h3>
               <button
                 onClick={onClose}
-                className="rounded-md bg-white text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-white text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2"
               >
                 <X className="h-6 w-6" />
               </button>

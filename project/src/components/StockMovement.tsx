@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Plus, Minus, ArrowUpDown } from 'lucide-react';
 import { Product, StockMovement } from '../types';
 import { generateId } from '../utils/stockUtils';
+import { PageHeader } from './shared/PageLayout';
 
 interface StockMovementProps {
   products: Product[];
@@ -82,17 +83,20 @@ export const StockMovementComponent: React.FC<StockMovementProps> = ({
     .slice(0, 20);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-900">Stock Movements</h2>
+    <div className="space-y-5">
+      <PageHeader
+        title="Stock movements"
+        subtitle="Record stock changes and review recent inventory activity"
+        actions={
         <button
           onClick={() => setIsFormOpen(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors"
+          className="flex min-h-9 items-center gap-2 rounded-md bg-emerald-700 px-4 py-2 font-medium text-white transition-colors hover:bg-emerald-800"
         >
           <ArrowUpDown className="w-4 h-4" />
-          <span>Record Movement</span>
+          <span>Record movement</span>
         </button>
-      </div>
+        }
+      />
 
       {isFormOpen && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">

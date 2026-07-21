@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Plus, Search, Eye, Edit2, Trash2, FileText, Calendar, DollarSign, Package } from 'lucide-react';
+import { Plus, Search, Eye, Edit2, Trash2, FileText, Package } from 'lucide-react';
 import { PurchaseOrder, Product, Supplier, PurchaseOrderItem } from '../types';
 import { generateId, formatCurrency, formatDate } from '../utils/stockUtils';
 import { useAuth } from '../contexts/AuthContext';
+import { PageHeader } from './shared/PageLayout';
 
 interface PurchaseOrdersProps {
   purchaseOrders: PurchaseOrder[];
@@ -93,35 +94,36 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-900">Purchase Orders</h2>
-        {hasPermission('add_purchase_order') && (
+    <div className="space-y-5">
+      <PageHeader
+        title="Purchase orders"
+        subtitle="Create, receive, and track supplier orders"
+        actions={hasPermission('add_purchase_order') ? (
           <button
             onClick={() => setShowPOForm(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors"
+            className="flex min-h-9 items-center gap-2 rounded-md bg-emerald-700 px-4 py-2 font-medium text-white transition-colors hover:bg-emerald-800"
           >
             <Plus className="w-4 h-4" />
-            <span>New Purchase Order</span>
+            <span>New purchase order</span>
           </button>
-        )}
-      </div>
+        ) : undefined}
+      />
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
           { label: 'Total POs', value: purchaseOrders.length, color: 'text-blue-600' },
           { label: 'Draft', value: purchaseOrders.filter(po => po.status === 'draft').length, color: 'text-gray-600' },
           { label: 'Sent', value: purchaseOrders.filter(po => po.status === 'sent').length, color: 'text-blue-600' },
           { label: 'Received', value: purchaseOrders.filter(po => po.status === 'received').length, color: 'text-green-600' }
         ].map((stat, index) => (
-          <div key={index} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div key={index} className="rounded-md border border-gray-200 bg-white p-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-600">{stat.label}</p>
-                <p className={`text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
+                <p className={`mt-1 text-2xl font-semibold ${stat.color}`}>{stat.value}</p>
               </div>
-              <FileText className="w-8 h-8 text-gray-400" />
+              <FileText className="h-5 w-5 text-gray-400" />
             </div>
           </div>
         ))}
@@ -258,7 +260,6 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
       {viewingPO && (
         <PurchaseOrderDetail
           po={viewingPO}
-          products={products}
           onClose={() => setViewingPO(null)}
           onReceive={handleReceivePO}
           onUpdateStatus={(poId, status) => {
@@ -509,7 +510,6 @@ const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
 // Purchase Order Detail Component
 interface PurchaseOrderDetailProps {
   po: PurchaseOrder;
-  products: Product[];
   onClose: () => void;
   onReceive: (po: PurchaseOrder) => void;
   onUpdateStatus: (poId: string, status: string) => void;
@@ -517,7 +517,6 @@ interface PurchaseOrderDetailProps {
 
 const PurchaseOrderDetail: React.FC<PurchaseOrderDetailProps> = ({
   po,
-  products,
   onClose,
   onReceive,
   onUpdateStatus

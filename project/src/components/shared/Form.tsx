@@ -42,8 +42,8 @@ export const Input: React.FC<InputProps> = ({ error, className = '', ...props })
   return (
     <input
       className={`
-        block w-full rounded-lg border-gray-300 shadow-sm
-        focus:border-blue-500 focus:ring-blue-500 sm:text-sm
+        block min-w-0 w-full rounded-md border-gray-300 shadow-sm
+        focus:border-emerald-600 focus:ring-emerald-600 sm:text-sm
         disabled:bg-gray-50 disabled:text-gray-500
         ${error ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}
         ${className}
@@ -61,8 +61,8 @@ export const TextArea: React.FC<TextAreaProps> = ({ error, className = '', ...pr
   return (
     <textarea
       className={`
-        block w-full rounded-lg border-gray-300 shadow-sm
-        focus:border-blue-500 focus:ring-blue-500 sm:text-sm
+        block min-w-0 w-full rounded-md border-gray-300 shadow-sm
+        focus:border-emerald-600 focus:ring-emerald-600 sm:text-sm
         disabled:bg-gray-50 disabled:text-gray-500
         ${error ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}
         ${className}
@@ -81,8 +81,8 @@ export const Select: React.FC<SelectProps> = ({ error, options, className = '', 
   return (
     <select
       className={`
-        block w-full rounded-lg border-gray-300 shadow-sm
-        focus:border-blue-500 focus:ring-blue-500 sm:text-sm
+        block min-w-0 w-full rounded-md border-gray-300 shadow-sm
+        focus:border-emerald-600 focus:ring-emerald-600 sm:text-sm
         disabled:bg-gray-50 disabled:text-gray-500
         ${error ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}
         ${className}
@@ -109,8 +109,8 @@ export const Checkbox: React.FC<CheckboxProps> = ({ label, error, className = ''
       <input
         type="checkbox"
         className={`
-          rounded border-gray-300 text-blue-600
-          focus:ring-blue-500 disabled:opacity-50
+          rounded border-gray-300 text-emerald-700
+          focus:ring-emerald-600 disabled:opacity-50
           ${error ? 'border-red-300' : ''}
         `}
         {...props}
@@ -148,8 +148,8 @@ export const RadioGroup: React.FC<RadioGroupProps> = ({
             checked={value === option.value}
             onChange={(e) => onChange?.(e.target.value)}
             className={`
-              border-gray-300 text-blue-600
-              focus:ring-blue-500 disabled:opacity-50
+              border-gray-300 text-emerald-700
+              focus:ring-emerald-600 disabled:opacity-50
               ${error ? 'border-red-300' : ''}
             `}
           />

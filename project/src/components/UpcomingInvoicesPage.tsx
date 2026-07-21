@@ -176,7 +176,7 @@ export const UpcomingInvoicesPage: React.FC<UpcomingInvoicesPageProps> = ({ prod
     <div className="space-y-6">
       <PageHeader
         title="Upcoming invoices"
-        subtitle="Upload supplier invoice PDF, review extracted rows, then save incoming stock lines."
+        subtitle="Review supplier invoices and expected incoming stock"
         onBack={onBack}
       />
 

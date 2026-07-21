@@ -16,6 +16,7 @@ import {
 import type { DailyClosing, MonthlyReportData, Order, Product } from '../types';
 import { formatCurrency, formatDate, resolveOrderItemsForDisplay, toMoneyNumber } from '../utils/stockUtils';
 import { getLatestMonthlyReportMonth, getMonthlyReportData } from '../lib/supabase';
+import { PageHeader } from './shared/PageLayout';
 
 type MonthlyReportsPageProps = {
   orders: Order[];
@@ -331,14 +332,11 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
   const largestExpenseTotal = Math.max(1, ...analytics.expensesByType.map((row) => row.total));
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Monthly Reports</h2>
-          <p className="mt-1 text-sm text-gray-500">
-            {month.label} financial summary from daily closings, expenses, vendor purchases, and sales.
-          </p>
-        </div>
+    <div className="space-y-5">
+      <PageHeader
+        title="Monthly reports"
+        subtitle={`${month.label} financial summary from daily closings, expenses, vendor purchases, and sales`}
+        actions={
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <div className="relative">
             <CalendarDays className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
@@ -372,7 +370,8 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
             JSON
           </button>
         </div>
-      </div>
+        }
+      />
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">

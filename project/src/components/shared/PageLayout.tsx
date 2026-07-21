@@ -5,6 +5,7 @@ interface PageHeaderProps {
   title: string;
   subtitle?: string;
   onBack?: () => void;
+  backButton?: React.ReactNode;
   actions?: React.ReactNode;
 }
 
@@ -12,34 +13,36 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   title,
   subtitle,
   onBack,
+  backButton,
   actions
 }) => {
   return (
-    <div className="mb-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          {onBack && (
+    <header className="mb-5 flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex min-w-0 items-start gap-3">
+          {backButton || (onBack && (
             <button
+              type="button"
               onClick={onBack}
-              className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
+              title="Go back"
+              aria-label="Go back"
             >
               <ChevronLeft className="w-5 h-5" />
             </button>
-          )}
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
+          ))}
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold text-gray-900 sm:text-2xl">{title}</h1>
             {subtitle && (
-              <p className="mt-1 text-sm text-gray-500">{subtitle}</p>
+              <p className="mt-1 text-sm leading-5 text-gray-500">{subtitle}</p>
             )}
           </div>
-        </div>
-        {actions && (
-          <div className="flex items-center space-x-3">
-            {actions}
-          </div>
-        )}
       </div>
-    </div>
+      {actions && (
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {actions}
+        </div>
+      )}
+    </header>
   );
 };
 
@@ -53,7 +56,7 @@ export const PageContainer: React.FC<PageContainerProps> = ({
   className = ''
 }) => {
   return (
-    <div className={`bg-white rounded-md border border-gray-200 ${className}`}>
+    <div className={`min-w-0 rounded-md border border-gray-200 bg-white ${className}`}>
       {children}
     </div>
   );
@@ -75,10 +78,10 @@ export const PageSection: React.FC<PageSectionProps> = ({
   actions
 }) => {
   return (
-    <div className={`p-6 ${className}`}>
+    <section className={`p-4 sm:p-6 ${className}`}>
       {(title || description || actions) && (
-        <div className="flex items-start justify-between mb-6">
-          <div>
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
             {title && (
               <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
             )}
@@ -87,14 +90,14 @@ export const PageSection: React.FC<PageSectionProps> = ({
             )}
           </div>
           {actions && (
-            <div className="flex items-center space-x-3">
+            <div className="flex flex-wrap items-center gap-2">
               {actions}
             </div>
           )}
         </div>
       )}
       {children}
-    </div>
+    </section>
   );
 };
 

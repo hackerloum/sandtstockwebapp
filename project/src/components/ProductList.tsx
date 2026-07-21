@@ -1,16 +1,30 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { Search, Plus, Edit2, Trash2, Eye, Package, Filter, X, SortAsc, SortDesc, Clock, Download, RotateCcw, FileText } from 'lucide-react';
+import React, { useCallback, useMemo, useState } from 'react';
+import {
+  ArrowDownAZ,
+  ArrowUpAZ,
+  Download,
+  Edit2,
+  Eye,
+  FileText,
+  MoreHorizontal,
+  Package,
+  Plus,
+  RotateCcw,
+  Search,
+  SlidersHorizontal,
+  Trash2,
+  X
+} from 'lucide-react';
 import { Product } from '../types';
-import { getStockStatus, getStockStatusColor, getStatusText, formatCurrency, formatWeight, getUpdatedTimeline, getUpdatedTimelineLabel, getUpdatedTimelineBadgeClass, isNotUpdatedWithin7Days } from '../utils/stockUtils';
-import { exportProductsToExcel, exportFilteredProductsToExcel } from '../utils/excelUtils';
-import { downloadInStockInventoryPdf } from '../utils/pdfUtils';
-import { PageHeader, PageContainer, PageSection, EmptyState } from './shared/PageLayout';
-import { Button } from './shared/Button';
-import { Table } from './shared/Table';
-import { Input, Select } from './shared/Form';
-import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
 import { updateProduct } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { exportFilteredProductsToExcel, exportProductsToExcel } from '../utils/excelUtils';
+import { downloadInStockInventoryPdf } from '../utils/pdfUtils';
+import { formatCurrency, getStockStatus, isNotUpdatedWithin7Days } from '../utils/stockUtils';
+import { Button } from './shared/Button';
+import { Input, Select } from './shared/Form';
+import { Modal } from './shared/Modal';
+import { EmptyState, PageHeader } from './shared/PageLayout';
 
 interface ProductListProps {
   products: Product[];
@@ -21,26 +35,41 @@ interface ProductListProps {
   onUpdateProduct?: (product: Product) => void;
 }
 
-type SortField = 'commercial_name' | 'code' | 'current_stock' | 'price' | 'created_at' | 'updated_at' | 'product_type';
-type SortDirection = 'asc' | 'desc';
-
-interface SearchFilters {
-  searchTerm: string;
-  statusFilter: string;
-  categoryFilter: string;
-  productTypeFilter: string;
-  brandFilter: string;
-  updatedFilter: 'all' | 'today' | 'last_week';
-  priceRange: { min: number; max: number };
-  stockRange: { min: number; max: number };
-  isTester: boolean | null;
-}
-
-// Extended Product interface for the component
 interface ExtendedProduct extends Product {
   brand?: { name: string } | null;
   supplier?: { name: string } | null;
 }
+
+type SortField = 'commercial_name' | 'current_stock' | 'price' | 'updated_at';
+type SortDirection = 'asc' | 'desc';
+
+const statusOptions = [
+  { value: 'all', label: 'All stock' },
+  { value: 'ok', label: 'In stock' },
+  { value: 'low', label: 'Low stock' },
+  { value: 'out', label: 'Out of stock' },
+  { value: 'high', label: 'High stock' }
+];
+
+const sortOptions = [
+  { value: 'commercial_name', label: 'Name' },
+  { value: 'current_stock', label: 'Stock' },
+  { value: 'price', label: 'Price' },
+  { value: 'updated_at', label: 'Last updated' }
+];
+
+const stockPresentation = (product: Product) => {
+  const stock = Number(product.current_stock || 0);
+  const minimum = Number(product.min_stock || 0);
+
+  if (stock <= 0) {
+    return { label: 'Out of stock', className: 'border-red-200 bg-red-50 text-red-700', dot: 'bg-red-500' };
+  }
+  if (stock <= minimum) {
+    return { label: 'Low stock', className: 'border-amber-200 bg-amber-50 text-amber-700', dot: 'bg-amber-500' };
+  }
+  return { label: 'In stock', className: 'border-emerald-200 bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' };
+};
 
 export const ProductList: React.FC<ProductListProps> = ({
   products,
@@ -51,1528 +80,489 @@ export const ProductList: React.FC<ProductListProps> = ({
   onUpdateProduct
 }) => {
   const { hasPermission, user } = useAuth();
-  
-  // Add debugging for permissions
-  console.log('ProductList: Current user:', user?.username, 'Role:', user?.role);
-  console.log('ProductList: Edit permission:', hasPermission('edit_product'));
-  console.log('ProductList: Delete permission:', hasPermission('delete_product'));
-  console.log('ProductList: Add permission:', hasPermission('add_product'));
-  
-  // Show warning if permissions are missing
-  if (!hasPermission('edit_product')) {
-    console.warn('ProductList: User does not have edit_product permission - edit buttons will be hidden');
-  }
-  if (!hasPermission('delete_product')) {
-    console.warn('ProductList: User does not have delete_product permission - delete buttons will be hidden');
-  }
-  if (!hasPermission('add_product')) {
-    console.warn('ProductList: User does not have add_product permission - add buttons will be hidden');
-  }
-  
-  // Add debugging for products prop
-  console.log('ProductList: Received products:', products);
-  console.log('ProductList: Products count:', products?.length || 0);
-  
-  // Check for products with missing required fields
-  const productsWithIssues = products?.filter(p => !p.id || !p.code || !p.commercial_name || !p.category || !p.product_type) || [];
-  if (productsWithIssues.length > 0) {
-    console.log('ProductList: Products with missing required fields:', productsWithIssues);
-  }
-  
-  const [filters, setFilters] = useState<SearchFilters>({
-    searchTerm: '',
-    statusFilter: 'all',
-    categoryFilter: 'all',
-    productTypeFilter: 'all',
-    brandFilter: 'all',
-    updatedFilter: 'all',
-    priceRange: { min: -1e6, max: 10000 },
-    stockRange: { min: -1e6, max: 1000 },
-    isTester: null
-  });
-
+  const extendedProducts = products as ExtendedProduct[];
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [productTypeFilter, setProductTypeFilter] = useState('all');
+  const [brandFilter, setBrandFilter] = useState('all');
   const [sortField, setSortField] = useState<SortField>('commercial_name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [showFilters, setShowFilters] = useState(false);
+  const [showTools, setShowTools] = useState(false);
   const [showBulkPriceUpdate, setShowBulkPriceUpdate] = useState(false);
   const [zeroingStaleStock, setZeroingStaleStock] = useState(false);
   const [bulkPriceUpdate, setBulkPriceUpdate] = useState({
+    updateType: 'percentage' as 'percentage' | 'fixed',
     percentage: 0,
-    fixedAmount: 0,
-    updateType: 'percentage' as 'percentage' | 'fixed'
+    fixedAmount: 0
   });
 
-  const [showFloatingSearch, setShowFloatingSearch] = useState(false);
+  const categories = useMemo(
+    () => Array.from(new Set(extendedProducts.map((product) => product.category).filter(Boolean))).sort(),
+    [extendedProducts]
+  );
+  const productTypes = useMemo(
+    () => Array.from(new Set(extendedProducts.map((product) => product.product_type).filter(Boolean))).sort(),
+    [extendedProducts]
+  );
+  const brands = useMemo(
+    () => Array.from(new Set(extendedProducts.map((product) => product.brand?.name || product.brand_id).filter(Boolean) as string[])).sort(),
+    [extendedProducts]
+  );
 
-  // Cast products to ExtendedProduct for brand/supplier access
-  const extendedProducts = products as ExtendedProduct[];
-
-  // Export functions
-  const handleExportAllProducts = () => {
-    try {
-      const filename = exportProductsToExcel(extendedProducts, 'all_products');
-      console.log(`Exported all products to ${filename}`);
-      // Show success message
-      alert(`✅ Successfully exported ${extendedProducts.length} products to ${filename}\n\n📊 Excel contains:\n• Commercial Name\n• Code Name\n• Item Number\n• Current Stock\n• Price\n• Stock Status (with colors)`);
-    } catch (error) {
-      console.error('Error exporting products:', error);
-      alert('❌ Failed to export products. Please try again.');
-    }
-  };
-
-  const handleDownloadInStockPdf = useCallback(() => {
-    try {
-      downloadInStockInventoryPdf(extendedProducts);
-    } catch (error) {
-      console.error('In-stock inventory PDF failed:', error);
-      alert('Could not generate the PDF. Please try again.');
-    }
-  }, [extendedProducts]);
-
-  const handleExportFilteredProducts = () => {
-    try {
-      const filename = exportFilteredProductsToExcel(extendedProducts, filters, 'filtered_products');
-      console.log(`Exported filtered products to ${filename}`);
-      // Show success message
-      alert(`✅ Successfully exported ${extendedProducts.length} filtered products to ${filename}\n\n📊 Excel contains:\n• Commercial Name\n• Code Name\n• Item Number\n• Current Stock\n• Price\n• Stock Status (with colors)`);
-    } catch (error) {
-      console.error('Error exporting filtered products:', error);
-      alert('❌ Failed to export filtered products. Please try again.');
-    }
-  };
-
-  // Bulk price update functions
-  const handleBulkPriceUpdate = async () => {
-    if (!hasPermission('edit_product')) {
-      alert('❌ You do not have permission to update product prices.');
-      return;
-    }
-
-    console.log('User permissions check passed');
-    console.log('Current user:', user);
-    console.log('Supabase client available:', !!supabase);
-
-    const { percentage, fixedAmount, updateType } = bulkPriceUpdate;
-    
-    if (updateType === 'percentage' && (percentage === 0 || percentage < -100)) {
-      alert('❌ Please enter a valid percentage (must be greater than -100%).');
-      return;
-    }
-    
-    if (updateType === 'fixed' && fixedAmount === 0) {
-      alert('❌ Please enter a valid fixed amount.');
-      return;
-    }
-
-    const confirmMessage = updateType === 'percentage' 
-      ? `Are you sure you want to update prices by ${percentage > 0 ? '+' : ''}${percentage}% for all ${extendedProducts.length} products?`
-      : `Are you sure you want to set ALL product prices to ${formatCurrency(fixedAmount)}?`;
-
-    if (!confirm(confirmMessage)) {
-      return;
-    }
-
-    try {
-      let updatedCount = 0;
-      let errors: string[] = [];
-
-      console.log('Bulk price update starting...');
-      console.log('Products to update:', extendedProducts.length);
-      console.log('Update type:', updateType);
-      console.log('Percentage:', percentage);
-      console.log('Fixed amount:', fixedAmount);
-
-      for (const product of extendedProducts) {
-        try {
-          let newPrice = 0;
-          
-          if (updateType === 'percentage') {
-            // For percentage, calculate based on current price
-            newPrice = (product.price || 0) * (1 + percentage / 100);
-          } else {
-            // For fixed amount, use the exact amount entered
-            newPrice = fixedAmount;
-          }
-          
-          // Ensure price doesn't go negative
-          newPrice = Math.max(0, newPrice);
-          
-          // Round to 2 decimal places
-          newPrice = Math.round(newPrice * 100) / 100;
-
-          console.log(`Updating product ${product.id} (${product.commercial_name}): ${product.price} -> ${newPrice}`);
-
-          // Update the product in the database using the updateProduct function
-          const updatedProduct = await updateProduct(product.id, { 
-            price: newPrice,
-            updated_by: user?.id || null
-          });
-
-          if (updatedProduct) {
-            console.log(`Successfully updated product ${product.id}`);
-            updatedCount++;
-          } else {
-            console.error(`Failed to update product ${product.id}`);
-            errors.push(`${product.commercial_name}: Update failed`);
-          }
-        } catch (error) {
-          console.error(`Exception updating product ${product.id}:`, error);
-          errors.push(`${product.commercial_name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-      }
-
-      console.log(`Bulk update completed. Updated: ${updatedCount}, Errors: ${errors.length}`);
-
-      if (updatedCount > 0) {
-        alert(`✅ Successfully updated prices for ${updatedCount} products!`);
-        // Reset the form
-        setBulkPriceUpdate({
-          percentage: 0,
-          fixedAmount: 0,
-          updateType: 'percentage'
-        });
-        setShowBulkPriceUpdate(false);
-        // Refresh the page to show updated data
-        window.location.reload();
-      }
-
-      if (errors.length > 0) {
-        console.error('Errors during bulk update:', errors);
-        alert(`⚠️ Updated ${updatedCount} products, but ${errors.length} had errors. Check console for details.`);
-      }
-    } catch (error) {
-      console.error('Error during bulk price update:', error);
-      alert('❌ Error updating prices. Please try again.');
-    }
-  };
-
-  const calculateNewPrice = (currentPrice: number) => {
-    const { percentage, fixedAmount, updateType } = bulkPriceUpdate;
-    let newPrice = 0;
-    
-    if (updateType === 'percentage') {
-      newPrice = (currentPrice || 0) * (1 + percentage / 100);
-    } else {
-      newPrice = fixedAmount;
-    }
-    
-    return Math.max(0, Math.round(newPrice * 100) / 100);
-  };
-  
-  console.log('ProductList: Extended products:', extendedProducts);
-  console.log('ProductList: Extended products count:', extendedProducts?.length || 0);
-
-  // Calculate dynamic ranges based on actual data (include negatives so all products show)
-  const minStock = useMemo(() => {
-    if (extendedProducts.length === 0) return 0;
-    return Math.min(...extendedProducts.map(p => p.current_stock ?? 0));
-  }, [extendedProducts]);
-
-  const maxStock = useMemo(() => {
-    if (extendedProducts.length === 0) return 1000;
-    return Math.max(...extendedProducts.map(p => p.current_stock ?? 0), 1000);
-  }, [extendedProducts]);
-
-  const minPrice = useMemo(() => {
-    if (extendedProducts.length === 0) return 0;
-    return Math.min(...extendedProducts.map(p => p.price ?? 0));
-  }, [extendedProducts]);
-
-  const maxPrice = useMemo(() => {
-    if (extendedProducts.length === 0) return 10000;
-    return Math.max(...extendedProducts.map(p => p.price ?? 0), 10000);
-  }, [extendedProducts]);
-
-  // Extract unique values for filters
-  const categories = useMemo(() => Array.from(new Set(extendedProducts.map(p => p.category))), [extendedProducts]);
-  const productTypes = useMemo(() => Array.from(new Set(extendedProducts.map(p => p.product_type))), [extendedProducts]);
-  const brands = useMemo(() => Array.from(new Set(extendedProducts.map(p => p.brand?.name || p.brand_id).filter(Boolean))), [extendedProducts]);
-  
-  console.log('ProductList: Available categories:', categories);
-  console.log('ProductList: Available product types:', productTypes);
-  console.log('ProductList: Available brands:', brands);
-  console.log('ProductList: Max stock found:', maxStock);
-  console.log('ProductList: Max price found:', maxPrice);
-
-  // Update filters with dynamic ranges so all products (including negative stock/price) are included
-  useEffect(() => {
-    if (extendedProducts.length === 0) return;
-    const stockWider = minStock < 0 || maxStock > 1000;
-    const priceWider = minPrice < 0 || maxPrice > 10000;
-    if (stockWider || priceWider) {
-      setFilters(prev => ({
-        ...prev,
-        priceRange: { min: minPrice, max: maxPrice },
-        stockRange: { min: minStock, max: maxStock }
-      }));
-    }
-  }, [extendedProducts.length, minStock, maxStock, minPrice, maxPrice]);
-
-  // Enhanced search functionality
   const filteredProducts = useMemo(() => {
-    console.log('ProductList: Filtering products with filters:', filters);
-    console.log('ProductList: Starting with', extendedProducts.length, 'products');
-    
-    const filtered = extendedProducts.filter(product => {
-      // Search term matching (multiple fields)
-      const searchLower = filters.searchTerm.toLowerCase();
-      const matchesSearch = !filters.searchTerm || 
-        product.commercial_name.toLowerCase().includes(searchLower) ||
-        product.code.toLowerCase().includes(searchLower) ||
-        product.item_number.toLowerCase().includes(searchLower) ||
-        (product.brand?.name || product.brand_id || '').toLowerCase().includes(searchLower) ||
-        (product.fragrance_notes || '').toLowerCase().includes(searchLower) ||
-        (product.concentration || '').toLowerCase().includes(searchLower) ||
-        (product.gender || '').toLowerCase().includes(searchLower) ||
-        (product.season || []).some(s => s.toLowerCase().includes(searchLower));
+    const term = searchTerm.trim().toLowerCase();
+    const result = extendedProducts.filter((product) => {
+      const searchable = [
+        product.commercial_name,
+        product.code,
+        product.item_number,
+        product.category,
+        product.product_type,
+        product.brand?.name,
+        product.brand_id
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
 
-      // Status filter
-      const matchesStatus = filters.statusFilter === 'all' || getStockStatus(product as any) === filters.statusFilter;
-
-      // Category filter
-      const matchesCategory = filters.categoryFilter === 'all' || product.category === filters.categoryFilter;
-
-      // Product type filter
-      const matchesProductType = filters.productTypeFilter === 'all' || product.product_type === filters.productTypeFilter;
-
-      // Brand filter
-      const matchesBrand = filters.brandFilter === 'all' || 
-        (product.brand?.name || product.brand_id || '') === filters.brandFilter;
-
-      // Price range filter
-      const matchesPrice = product.price >= filters.priceRange.min && product.price <= filters.priceRange.max;
-
-      // Stock range filter
-      const matchesStock = product.current_stock >= filters.stockRange.min && product.current_stock <= filters.stockRange.max;
-
-      // Tester filter
-      const matchesTester = filters.isTester === null || product.is_tester === filters.isTester;
-
-      // Updated timeline filter (today = updated today; last_week = today, yesterday, or last 7 days)
-      const timeline = getUpdatedTimeline(product.updated_at);
-      const matchesUpdated =
-        filters.updatedFilter === 'all' ||
-        (filters.updatedFilter === 'today' && timeline === 'today') ||
-        (filters.updatedFilter === 'last_week' && (timeline === 'today' || timeline === 'yesterday' || timeline === 'last_week'));
-
-      const matches = matchesSearch && matchesStatus && matchesCategory && matchesProductType && 
-             matchesBrand && matchesPrice && matchesStock && matchesTester && matchesUpdated;
-             
-      // Debug individual product filtering
-      if (!matches) {
-        console.log(`ProductList: Product "${product.commercial_name}" (${product.code}) filtered out:`, {
-          matchesSearch,
-          matchesStatus,
-          matchesCategory,
-          matchesProductType,
-          matchesBrand,
-          matchesPrice,
-          matchesStock,
-          matchesTester,
-          product: {
-            commercial_name: product.commercial_name,
-            code: product.code,
-            category: product.category,
-            product_type: product.product_type,
-            brand: product.brand?.name || product.brand_id,
-            price: product.price,
-            current_stock: product.current_stock,
-            is_tester: product.is_tester
-          }
-        });
-      }
-
-      return matches;
+      return (
+        (!term || searchable.includes(term)) &&
+        (statusFilter === 'all' || getStockStatus(product as Product) === statusFilter) &&
+        (categoryFilter === 'all' || product.category === categoryFilter) &&
+        (productTypeFilter === 'all' || product.product_type === productTypeFilter) &&
+        (brandFilter === 'all' || (product.brand?.name || product.brand_id) === brandFilter)
+      );
     });
-    
-    console.log('ProductList: Filtered products count:', filtered.length);
-    console.log('ProductList: Products filtered out:', extendedProducts.length - filtered.length);
-    return filtered;
-  }, [extendedProducts, filters]);
 
-  // Sorting functionality
-  const sortedProducts = useMemo(() => {
-    return [...filteredProducts].sort((a, b) => {
-      let aValue: any = a[sortField];
-      let bValue: any = b[sortField];
-
-      // Handle nested objects
-      if (sortField === 'commercial_name' && a.brand?.name) {
-        aValue = a.brand.name;
-        bValue = b.brand?.name || b.brand_id;
-      }
-
-      // Handle date comparison for updated_at
+    return result.sort((a, b) => {
+      let left: string | number = a[sortField] || '';
+      let right: string | number = b[sortField] || '';
       if (sortField === 'updated_at') {
-        const aTime = aValue ? new Date(aValue).getTime() : 0;
-        const bTime = bValue ? new Date(bValue).getTime() : 0;
-        if (aTime < bTime) return sortDirection === 'asc' ? -1 : 1;
-        if (aTime > bTime) return sortDirection === 'asc' ? 1 : -1;
-        return 0;
+        left = left ? new Date(left).getTime() : 0;
+        right = right ? new Date(right).getTime() : 0;
       }
-
-      // Handle string comparison
-      if (typeof aValue === 'string' && typeof bValue === 'string') {
-        aValue = aValue.toLowerCase();
-        bValue = bValue.toLowerCase();
-      }
-
-      if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
-      if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
-      return 0;
+      if (typeof left === 'string') left = left.toLowerCase();
+      if (typeof right === 'string') right = right.toLowerCase();
+      if (left === right) return 0;
+      const order = left > right ? 1 : -1;
+      return sortDirection === 'asc' ? order : -order;
     });
-  }, [filteredProducts, sortField, sortDirection]);
+  }, [brandFilter, categoryFilter, extendedProducts, productTypeFilter, searchTerm, sortDirection, sortField, statusFilter]);
 
-  // Search suggestions
-  const searchSuggestions = useMemo(() => {
-    if (!filters.searchTerm || filters.searchTerm.length < 2) return [];
-    
-    const suggestions = new Set<string>();
-    const searchLower = filters.searchTerm.toLowerCase();
-    
-    extendedProducts.forEach(product => {
-      // Add exact matches first
-      if (product.commercial_name.toLowerCase().includes(searchLower)) {
-        suggestions.add(product.commercial_name);
-      }
-      if (product.code.toLowerCase().includes(searchLower)) {
-        suggestions.add(product.code);
-      }
-      if (product.brand?.name && product.brand.name.toLowerCase().includes(searchLower)) {
-        suggestions.add(product.brand.name);
-      }
-      
-      // Add partial matches for better suggestions
-      const words = product.commercial_name.toLowerCase().split(' ');
-      words.forEach(word => {
-        if (word.startsWith(searchLower) && word.length > 2) {
-          suggestions.add(word);
-        }
-      });
-      
-      // Add product type suggestions
-      if (product.product_type && product.product_type.toLowerCase().includes(searchLower)) {
-        suggestions.add(product.product_type);
-      }
-      
-      // Add category suggestions
-      if (product.category && product.category.toLowerCase().includes(searchLower)) {
-        suggestions.add(product.category);
-      }
-    });
-    
-    // Sort suggestions by relevance (exact matches first, then partial matches)
-    const sortedSuggestions = Array.from(suggestions).sort((a, b) => {
-      const aExact = a.toLowerCase().startsWith(searchLower);
-      const bExact = b.toLowerCase().startsWith(searchLower);
-      if (aExact && !bExact) return -1;
-      if (!aExact && bExact) return 1;
-      return a.localeCompare(b);
-    });
-    
-    return sortedSuggestions.slice(0, 8);
-  }, [extendedProducts, filters.searchTerm]);
+  const summary = useMemo(() => {
+    const inStock = extendedProducts.filter((product) => Number(product.current_stock || 0) > Number(product.min_stock || 0)).length;
+    const lowStock = extendedProducts.filter((product) => Number(product.current_stock || 0) > 0 && Number(product.current_stock || 0) <= Number(product.min_stock || 0)).length;
+    const outOfStock = extendedProducts.filter((product) => Number(product.current_stock || 0) <= 0).length;
+    const value = extendedProducts.reduce(
+      (total, product) => total + Number(product.current_stock || 0) * Number(product.price || 0),
+      0
+    );
+    return { inStock, lowStock, outOfStock, value };
+  }, [extendedProducts]);
 
-  // Handle search
-  const handleSearch = useCallback((searchTerm: string) => {
-    setFilters(prev => ({ ...prev, searchTerm }));
-    if (searchTerm && !searchHistory.includes(searchTerm)) {
-      setSearchHistory(prev => [searchTerm, ...prev.slice(0, 4)]);
+  const hasActiveFilters = Boolean(
+    searchTerm || statusFilter !== 'all' || categoryFilter !== 'all' || productTypeFilter !== 'all' || brandFilter !== 'all'
+  );
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setStatusFilter('all');
+    setCategoryFilter('all');
+    setProductTypeFilter('all');
+    setBrandFilter('all');
+  };
+
+  const handleDelete = (product: ExtendedProduct) => {
+    if (window.confirm(`Delete ${product.commercial_name}? This cannot be undone.`)) {
+      onDeleteProduct(product.id);
     }
-  }, [searchHistory]);
+  };
 
-  // Handle search suggestion click
-  const handleSuggestionClick = useCallback((suggestion: string) => {
-    console.log('ProductList: Clicked suggestion:', suggestion);
-    // Clear other filters and set the search term
-    setFilters({
-      searchTerm: suggestion,
-      statusFilter: 'all',
-      categoryFilter: 'all',
-      productTypeFilter: 'all',
-      brandFilter: 'all',
+  const handleExportAll = () => {
+    exportProductsToExcel(extendedProducts, 'all_products');
+  };
+
+  const handleExportFiltered = () => {
+    const filters = {
+      searchTerm,
+      statusFilter,
+      categoryFilter,
+      productTypeFilter,
+      brandFilter,
       updatedFilter: 'all',
-      priceRange: { min: minPrice, max: maxPrice },
-      stockRange: { min: minStock, max: maxStock },
+      priceRange: { min: Number.NEGATIVE_INFINITY, max: Number.POSITIVE_INFINITY },
+      stockRange: { min: Number.NEGATIVE_INFINITY, max: Number.POSITIVE_INFINITY },
       isTester: null
-    });
-    if (suggestion && !searchHistory.includes(suggestion)) {
-      setSearchHistory(prev => [suggestion, ...prev.slice(0, 4)]);
-    }
-  }, [searchHistory, minPrice, maxPrice, minStock, maxStock]);
-
-  useEffect(() => {
-    if (!showFloatingSearch) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const focusId = window.setTimeout(() => {
-      document.getElementById('floating-product-search-input')?.focus();
-    }, 0);
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setShowFloatingSearch(false);
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      window.clearTimeout(focusId);
-      document.body.style.overflow = prevOverflow;
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, [showFloatingSearch]);
+    exportFilteredProductsToExcel(extendedProducts, filters, 'filtered_products');
+  };
 
-  // Handle sort
-  const handleSort = useCallback((field: SortField) => {
-    if (sortField === field) {
-      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortField(field);
-      setSortDirection('asc');
-    }
-  }, [sortField]);
-
-  // Clear all filters
-  const clearFilters = useCallback(() => {
-    setFilters({
-      searchTerm: '',
-      statusFilter: 'all',
-      categoryFilter: 'all',
-      productTypeFilter: 'all',
-      brandFilter: 'all',
-      updatedFilter: 'all',
-      priceRange: { min: minPrice, max: maxPrice },
-      stockRange: { min: minStock, max: maxStock },
-      isTester: null
-    });
-  }, [minPrice, maxPrice, minStock, maxStock]);
-
-  /** Set current_stock to 0 for all products not updated within the last 7 days (uses updated_at). */
   const handleZeroStockNotUpdated7Days = useCallback(async () => {
-    const stale = extendedProducts.filter((p) => isNotUpdatedWithin7Days(p.updated_at));
-    if (stale.length === 0) {
-      alert('No products found that were not updated in the last 7 days. All products have been updated recently.');
+    const staleProducts = extendedProducts.filter((product) => isNotUpdatedWithin7Days(product.updated_at));
+    if (!staleProducts.length) {
+      window.alert('All products have been updated within the last 7 days.');
       return;
     }
-    const message = `Set current stock to 0 for ${stale.length} product(s) that have not been updated in the last 7 days?\n\nThis uses each product's "Updated" date (updated_at), not the created date.`;
-    if (!confirm(message)) return;
-    if (!onUpdateProduct) {
-      alert('Cannot update products: missing update handler.');
-      return;
-    }
+    if (!window.confirm(`Set stock to 0 for ${staleProducts.length} products not updated in the last 7 days?`)) return;
+
     setZeroingStaleStock(true);
     try {
-      let updated = 0;
-      for (const product of stale) {
-        const result = await updateProduct(product.id, { current_stock: 0 });
-        if (result) {
-          onUpdateProduct({ ...product, ...result, current_stock: 0 } as Product);
-          updated++;
-        }
+      for (const product of staleProducts) {
+        const updated = await updateProduct(product.id, { current_stock: 0, updated_by: user?.id || null });
+        if (updated && onUpdateProduct) onUpdateProduct({ ...product, ...updated, current_stock: 0 } as Product);
       }
-      alert(`Done. Set stock to 0 for ${updated} product(s) that were not updated in the last 7 days.`);
-    } catch (err) {
-      console.error('Error zeroing stale stock:', err);
-      alert(err instanceof Error ? err.message : 'Failed to update some products. Check console.');
     } finally {
       setZeroingStaleStock(false);
+      setShowTools(false);
     }
-  }, [extendedProducts, onUpdateProduct]);
+  }, [extendedProducts, onUpdateProduct, user?.id]);
 
-  const columns = [
-    {
-      key: 'codes',
-      header: 'Codes',
-      sortable: true,
-      width: '14%',
-      render: (product: ExtendedProduct) => {
-        const prefix = product.item_number?.substring(0, 2);
-        const suffix = product.item_number?.substring(2);
-        const getPrefixMeaning = (prefix: string) => {
-          switch (prefix) {
-            case 'AF': return 'Argeville Fragrance';
-            case 'ITM': return 'Item';
-            case 'PKG': return 'Packaging';
-            case 'AM': return 'Argeville Men';
-            case 'TK': return 'Tester Kit';
-            default: return 'Unknown';
-          }
-        };
-        
-        return (
-          <div className="min-w-0">
-            <div className="font-medium text-gray-900 truncate" title={product.code}>{product.code}</div>
-            <div className="text-xs text-gray-500 truncate" title={product.item_number}>
-              {prefix && <span className="font-semibold text-blue-600">{prefix}</span>}
-              {suffix}
-            </div>
-          </div>
-        );
-      }
-    },
-    {
-      key: 'details',
-      header: 'Product',
-      sortable: true,
-      width: '25%',
-      render: (product: ExtendedProduct) => (
-        <div className="min-w-0">
-          <div className="font-medium text-gray-900 truncate" title={product.commercial_name}>{product.commercial_name}</div>
-          <div className="text-xs text-gray-500 truncate">{product.brand?.name || product.brand_id || '—'}</div>
-          <div className="text-xs text-gray-400">{product.size}ml • {product.category || '—'}</div>
-          {product.product_type && (
-            <div className="text-xs text-blue-600 font-medium truncate">{product.product_type}</div>
-          )}
-        </div>
-      )
-    },
-    {
-      key: 'stock',
-      header: 'Stock',
-      sortable: true,
-      width: '10%',
-      render: (product: ExtendedProduct) => {
-        const currentStock = product.current_stock || 0;
-        const minStock = product.min_stock || 5;
-        const maxStock = product.max_stock || 50;
-        
-        // Determine stock status and color
-        let stockColor = 'text-green-600';
-        let bgColor = 'bg-green-100';
-        let borderColor = 'border-green-200';
-        
-        if (currentStock === 0) {
-          stockColor = 'text-red-600';
-          bgColor = 'bg-red-100';
-          borderColor = 'border-red-200';
-        } else if (currentStock <= minStock) {
-          stockColor = 'text-orange-600';
-          bgColor = 'bg-orange-100';
-          borderColor = 'border-orange-200';
-        }
-        
-        return (
-          <div className={`p-1.5 rounded border ${borderColor} ${bgColor} min-w-0`}>
-            <div className="flex items-baseline justify-between gap-1">
-              <span className={`font-bold ${stockColor}`}>{currentStock}</span>
-              <span className="text-xs text-gray-500">/ {maxStock}</span>
-            </div>
-            <div className="text-xs text-gray-600">Min {minStock}</div>
-          </div>
-        );
-      }
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      width: '12%',
-      render: (product: ExtendedProduct) => {
-        const status = getStockStatus(product as any);
-        const statusColor = getStockStatusColor(status);
-        const statusText = getStatusText(status);
-        const currentStock = product.current_stock || 0;
-        const minStock = product.min_stock || 5;
-        
-        // Enhanced status display with stock level indicators
-        let stockLevelText = '';
-        let stockLevelColor = '';
-        
-        if (currentStock === 0) {
-          stockLevelText = 'OUT OF STOCK';
-          stockLevelColor = 'bg-red-500 text-white';
-        } else if (currentStock <= minStock) {
-          stockLevelText = 'LOW STOCK';
-          stockLevelColor = 'bg-orange-500 text-white';
-        } else if (currentStock <= minStock * 2) {
-          stockLevelText = 'MEDIUM STOCK';
-          stockLevelColor = 'bg-yellow-500 text-white';
-        } else {
-          stockLevelText = 'IN STOCK';
-          stockLevelColor = 'bg-green-500 text-white';
-        }
-        
-        return (
-          <div className="space-y-1 min-w-0">
-            <span className={`inline-flex px-1.5 py-0.5 text-xs font-medium rounded border ${statusColor}`}>
-              {statusText}
-            </span>
-            <div className={`inline-flex px-1.5 py-0.5 text-xs font-bold rounded ${stockLevelColor}`}>
-              {stockLevelText}
-            </div>
-          </div>
-        );
-      }
-    },
-    {
-      key: 'price',
-      header: 'Price',
-      sortable: true,
-      width: '9%',
-      render: (product: ExtendedProduct) => (
-        <div className="min-w-0">
-          <div className="font-medium text-sm">{formatCurrency(product.price)}</div>
-        </div>
-      )
-    },
-    {
-      key: 'value',
-      header: 'Value',
-      sortable: true,
-      width: '11%',
-      render: (product: ExtendedProduct) => (
-        <div className="min-w-0">
-          <div className="font-medium text-sm">{formatCurrency(product.current_stock * product.price)}</div>
-        </div>
-      )
-    },
-    {
-      key: 'updated_at',
-      header: 'Updated',
-      sortable: true,
-      width: '13%',
-      render: (product: ExtendedProduct) => {
-        const timeline = getUpdatedTimeline(product.updated_at);
-        const label = getUpdatedTimelineLabel(product.updated_at);
-        const badgeClass = getUpdatedTimelineBadgeClass(timeline);
-        return (
-          <div className="space-y-0.5 min-w-0">
-            <span className={`inline-flex px-1.5 py-0.5 text-xs font-medium rounded border ${badgeClass}`}>
-              {label}
-            </span>
-            {product.updated_at && (
-              <div className="text-xs text-gray-500 truncate" title={new Date(product.updated_at).toLocaleString()}>
-                {new Date(product.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-              </div>
-            )}
-          </div>
-        );
-      }
+  const handleBulkPriceUpdate = async () => {
+    const { updateType, percentage, fixedAmount } = bulkPriceUpdate;
+    if (updateType === 'percentage' && (percentage === 0 || percentage <= -100)) {
+      window.alert('Enter a percentage greater than -100.');
+      return;
     }
-  ];
+    if (updateType === 'fixed' && fixedAmount < 0) {
+      window.alert('Enter a valid price.');
+      return;
+    }
+    if (!window.confirm(`Update prices for all ${extendedProducts.length} products?`)) return;
 
-  const statusOptions = [
-    { value: 'all', label: 'All Status' },
-    { value: 'out', label: 'Out of Stock' },
-    { value: 'low', label: 'Low Stock' },
-    { value: 'ok', label: 'Normal' },
-    { value: 'high', label: 'High Stock' }
-  ];
+    for (const product of extendedProducts) {
+      const nextPrice = updateType === 'percentage'
+        ? Math.max(0, Math.round(Number(product.price || 0) * (1 + percentage / 100) * 100) / 100)
+        : fixedAmount;
+      const updated = await updateProduct(product.id, { price: nextPrice, updated_by: user?.id || null });
+      if (updated && onUpdateProduct) onUpdateProduct({ ...product, ...updated, price: nextPrice } as Product);
+    }
+    setShowBulkPriceUpdate(false);
+    setShowTools(false);
+  };
 
-  const categoryOptions = [
-    { value: 'all', label: 'All Categories' },
-    ...categories.map(category => ({
-      value: category,
-      label: category
-    }))
-  ];
-
-  const productTypeOptions = [
-    { value: 'all', label: 'All Types' },
-    ...productTypes.map(type => ({
-      value: type,
-      label: type
-    }))
-  ];
-
-  const brandOptions = [
-    { value: 'all', label: 'All Brands' },
-    ...brands.map(brand => ({
-      value: brand || '',
-      label: brand || ''
-    })).filter(option => option.value !== '')
-  ];
-
-  const hasActiveFilters = filters.searchTerm || 
-    filters.statusFilter !== 'all' || 
-    filters.categoryFilter !== 'all' || 
-    filters.productTypeFilter !== 'all' || 
-    filters.brandFilter !== 'all' || 
-    filters.updatedFilter !== 'all' ||
-    filters.priceRange.min > minPrice || 
-    filters.priceRange.max < maxPrice || 
-    filters.stockRange.min > minStock || 
-    filters.stockRange.max < maxStock || 
-    filters.isTester !== null;
+  const ProductActions = ({ product }: { product: ExtendedProduct }) => (
+    <div className="flex items-center justify-end gap-1" onClick={(event) => event.stopPropagation()}>
+      <button
+        type="button"
+        onClick={() => onViewProduct(product)}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+        title="View product"
+        aria-label={`View ${product.commercial_name}`}
+      >
+        <Eye className="h-4 w-4" />
+      </button>
+      {hasPermission('edit_product') && (
+        <button
+          type="button"
+          onClick={() => onEditProduct(product)}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+          title="Edit product"
+          aria-label={`Edit ${product.commercial_name}`}
+        >
+          <Edit2 className="h-4 w-4" />
+        </button>
+      )}
+      {hasPermission('delete_product') && (
+        <button
+          type="button"
+          onClick={() => handleDelete(product)}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-700"
+          title="Delete product"
+          aria-label={`Delete ${product.commercial_name}`}
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  );
 
   return (
-    <div className="space-y-6" data-product-list="container">
+    <div className="space-y-5" data-product-list="container">
       <PageHeader
         title="Products"
-        subtitle={`${sortedProducts.length} of ${products.length} products`}
-        actions={
-          <div className="flex items-center space-x-3">
-            {/* Export Buttons */}
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="outline"
-                size="sm"
-                icon={<Download className="w-4 h-4" />}
-                onClick={handleExportAllProducts}
-                title="Export all products to Excel"
-              >
-                Export All
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                icon={<FileText className="w-4 h-4" />}
-                onClick={handleDownloadInStockPdf}
-                title="Download PDF: all products with stock on hand, totals in TZS"
-              >
-                In-stock PDF
-              </Button>
-              {hasActiveFilters && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  icon={<Download className="w-4 h-4" />}
-                  onClick={handleExportFilteredProducts}
-                  title="Export filtered products to Excel"
-                >
-                  Export Filtered
-                </Button>
-              )}
-            </div>
-            
-            {/* Bulk Price Update Button */}
-            {hasPermission('edit_product') && (
-              <Button
-                variant="outline"
-                size="sm"
-                icon={<Package className="w-4 h-4" />}
-                onClick={() => setShowBulkPriceUpdate(true)}
-                title="Update prices for all products"
-              >
-                Bulk Price Update
-              </Button>
-            )}
-
-            {/* Zero stock for products not updated in 7+ days */}
-            {hasPermission('edit_product') && (
-              <Button
-                variant="outline"
-                size="sm"
-                icon={<RotateCcw className="w-4 h-4" />}
-                onClick={handleZeroStockNotUpdated7Days}
-                disabled={zeroingStaleStock}
-                title="Set current stock to 0 for products not updated in the last 7 days (uses Updated date)"
-              >
-                {zeroingStaleStock ? 'Updating…' : 'Zero stock (not updated 7+ days)'}
-              </Button>
-            )}
-            
-            {/* Add Product Button */}
-            {hasPermission('add_product') ? (
-              <Button
-                variant="primary"
-                icon={<Plus className="w-4 h-4" />}
-                onClick={onAddProduct}
-              >
-                Add Product
-              </Button>
-            ) : (
-              <div className="text-sm text-gray-500 bg-gray-100 px-3 py-2 rounded-lg">
-                Add Product permission required
-              </div>
-            )}
-          </div>
-        }
+        subtitle={`${products.length} products in inventory`}
+        actions={hasPermission('add_product') ? (
+          <Button icon={<Plus className="h-4 w-4" />} onClick={onAddProduct}>Add product</Button>
+        ) : undefined}
       />
 
-      <PageContainer>
-        {/* Permission Status */}
-        {(!hasPermission('edit_product') || !hasPermission('delete_product') || !hasPermission('add_product')) && (
-          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <div className="text-sm text-yellow-800">
-              <strong>Permission Notice:</strong> 
-              <span className="ml-2">Current role: {user?.role || 'Unknown'}</span>
-              {!hasPermission('add_product') && <span className="ml-2">• Cannot add products</span>}
-              {!hasPermission('edit_product') && <span className="ml-2">• Cannot edit products</span>}
-              {!hasPermission('delete_product') && <span className="ml-2">• Cannot delete products</span>}
-              <span className="ml-2">Contact your administrator for access.</span>
-            </div>
+      <section className="overflow-hidden rounded-md border border-gray-200 bg-white">
+        <div className="grid grid-cols-2 divide-x divide-y divide-gray-200 sm:grid-cols-4 sm:divide-y-0 lg:grid-cols-[1fr_1fr_1fr_1.35fr]">
+          <div className="p-4">
+            <p className="text-xs font-medium uppercase text-gray-500">In stock</p>
+            <p className="mt-1 text-2xl font-semibold text-gray-900">{summary.inStock}</p>
           </div>
-        )}
-        
-        <PageSection>
-          {/* Search and Filters */}
-          <div className="space-y-4 mb-6">
-            {/* Main Search Bar */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+          <div className="p-4">
+            <p className="text-xs font-medium uppercase text-gray-500">Low stock</p>
+            <p className="mt-1 text-2xl font-semibold text-amber-700">{summary.lowStock}</p>
+          </div>
+          <div className="p-4">
+            <p className="text-xs font-medium uppercase text-gray-500">Out of stock</p>
+            <p className="mt-1 text-2xl font-semibold text-red-700">{summary.outOfStock}</p>
+          </div>
+          <div className="p-4">
+            <p className="text-xs font-medium uppercase text-gray-500">Inventory value</p>
+            <p className="mt-1 truncate text-lg font-semibold text-gray-900" title={formatCurrency(summary.value)}>{formatCurrency(summary.value)}</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-md border border-gray-200 bg-white">
+        <div className="space-y-3 border-b border-gray-200 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <Input
-                type="text"
-                placeholder="Search by name, code, brand, notes, or any product details..."
-                value={filters.searchTerm}
-                onChange={(e) => handleSearch(e.target.value)}
-                className="pl-10 pr-10"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Search name, code, item number, or category"
+                className="h-10 pl-9 pr-9"
               />
-              {filters.searchTerm && (
+              {searchTerm && (
                 <button
-                  onClick={() => handleSearch('')}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                  aria-label="Clear search"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="h-4 w-4" />
                 </button>
               )}
             </div>
-
-            {/* Search Suggestions */}
-            {searchSuggestions.length > 0 && filters.searchTerm && (
-              <div className="bg-white border border-gray-200 rounded-lg shadow-lg p-2">
-                <div className="text-xs text-gray-500 mb-2 flex items-center">
-                  <Clock className="w-3 h-3 mr-1" />
-                  Suggestions
-                </div>
-                {searchSuggestions.map((suggestion, index) => (
-                  <button
-                    key={index}
-                    onClick={() => handleSuggestionClick(suggestion)}
-                    className="block w-full text-left px-2 py-1 text-sm hover:bg-gray-100 rounded"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Quick Filters */}
-            <div className="flex flex-wrap gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:flex">
               <Select
-                value={filters.statusFilter}
-                onChange={(e) => setFilters(prev => ({ ...prev, statusFilter: e.target.value }))}
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
                 options={statusOptions}
-                className="w-32"
-              />
-              <Select
-                value={filters.categoryFilter}
-                onChange={(e) => setFilters(prev => ({ ...prev, categoryFilter: e.target.value }))}
-                options={categoryOptions}
-                className="w-40"
-              />
-              <Select
-                value={filters.productTypeFilter}
-                onChange={(e) => setFilters(prev => ({ ...prev, productTypeFilter: e.target.value }))}
-                options={productTypeOptions}
-                className="w-40"
-              />
-              <Select
-                value={filters.updatedFilter}
-                onChange={(e) => setFilters(prev => ({ ...prev, updatedFilter: e.target.value as 'all' | 'today' | 'last_week' }))}
-                options={[
-                  { value: 'all', label: 'Any update time' },
-                  { value: 'today', label: 'Updated today' },
-                  { value: 'last_week', label: 'Updated last 7 days' }
-                ]}
-                className="w-44"
+                className="h-10 min-w-0 sm:w-36"
+                aria-label="Filter by stock status"
               />
               <Button
-                variant="outline"
-                size="sm"
-                icon={<Filter className="w-4 h-4" />}
-                onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                variant={showFilters ? 'secondary' : 'outline'}
+                icon={<SlidersHorizontal className="h-4 w-4" />}
+                onClick={() => setShowFilters((value) => !value)}
+                className="h-10"
               >
-                {showAdvancedFilters ? 'Hide' : 'Advanced'} Filters
+                Filters
               </Button>
-              {hasActiveFilters && (
+              <div className="relative col-span-2 sm:col-span-1">
                 <Button
                   variant="outline"
-                  size="sm"
-                  icon={<X className="w-4 h-4" />}
-                  onClick={clearFilters}
+                  icon={<MoreHorizontal className="h-4 w-4" />}
+                  onClick={() => setShowTools((value) => !value)}
+                  className="h-10 w-full"
+                  aria-expanded={showTools}
                 >
-                  Clear All
+                  Tools
                 </Button>
-              )}
-            </div>
-
-            {/* Advanced Filters */}
-            {showAdvancedFilters && (
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
-                    <Select
-                      value={filters.brandFilter}
-                      onChange={(e) => setFilters(prev => ({ ...prev, brandFilter: e.target.value }))}
-                      options={brandOptions}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Price Range</label>
-                    <div className="flex gap-2">
-                      <Input
-                        type="number"
-                        placeholder="Min"
-                        value={filters.priceRange.min}
-                        onChange={(e) => setFilters(prev => ({ 
-                          ...prev, 
-                          priceRange: { ...prev.priceRange, min: Number(e.target.value) || 0 }
-                        }))}
-                        className="w-20"
-                      />
-                      <span className="self-center text-gray-500">-</span>
-                      <Input
-                        type="number"
-                        placeholder="Max"
-                        value={filters.priceRange.max}
-                        onChange={(e) => setFilters(prev => ({ 
-                          ...prev, 
-                          priceRange: { ...prev.priceRange, max: Number(e.target.value) || 10000 }
-                        }))}
-                        className="w-20"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Stock Range</label>
-                    <div className="flex gap-2">
-                      <Input
-                        type="number"
-                        placeholder="Min"
-                        value={filters.stockRange.min}
-                        onChange={(e) => setFilters(prev => ({ 
-                          ...prev, 
-                          stockRange: { ...prev.stockRange, min: Number(e.target.value) || 0 }
-                        }))}
-                        className="w-20"
-                      />
-                      <span className="self-center text-gray-500">-</span>
-                      <Input
-                        type="number"
-                        placeholder="Max"
-                        value={filters.stockRange.max}
-                        onChange={(e) => setFilters(prev => ({ 
-                          ...prev, 
-                          stockRange: { ...prev.stockRange, max: Number(e.target.value) || 1000 }
-                        }))}
-                        className="w-20"
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Tester Status</label>
-                  <Select
-                    value={filters.isTester === null ? 'all' : filters.isTester ? 'true' : 'false'}
-                    onChange={(e) => setFilters(prev => ({ 
-                      ...prev, 
-                      isTester: e.target.value === 'all' ? null : e.target.value === 'true'
-                    }))}
-                    options={[
-                      { value: 'all', label: 'All Products' },
-                      { value: 'true', label: 'Tester Only' },
-                      { value: 'false', label: 'Non-Tester Only' }
-                    ]}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Search History */}
-            {searchHistory.length > 0 && !filters.searchTerm && (
-              <div className="flex flex-wrap gap-2">
-                <span className="text-sm text-gray-500 flex items-center">
-                  <Clock className="w-3 h-3 mr-1" />
-                  Recent searches:
-                </span>
-                {searchHistory.map((term, index) => (
-                  <button
-                    key={index}
-                    onClick={() => handleSuggestionClick(term)}
-                    className="text-sm bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded"
-                  >
-                    {term}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Results Summary */}
-          {hasActiveFilters && (
-            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="flex items-center justify-between">
-                <div className="text-sm text-blue-800">
-                  Showing {sortedProducts.length} of {products.length} products
-                  {filters.searchTerm && (
-                    <span> matching "{filters.searchTerm}"</span>
-                  )}
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={clearFilters}
-                >
-                  Clear Filters
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Debug Information (only show if no products found) */}
-          {sortedProducts.length === 0 && products.length > 0 && (
-            <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="text-sm text-yellow-800">
-                <strong>Debug Info:</strong> No products found with current filters. 
-                Total products available: {products.length}
-                <br />
-                Active filters: {Object.entries(filters).map(([key, value]) => 
-                  value !== '' && value !== 'all' && value !== null && 
-                  (typeof value !== 'object' || (value.min !== 0 || value.max !== 10000)) ? 
-                  `${key}: ${JSON.stringify(value)}` : null
-                ).filter(Boolean).join(', ')}
-              </div>
-            </div>
-          )}
-
-          {/* Stock Summary and Export Options */}
-          {sortedProducts.length > 0 && (
-            <div className="mb-6 p-4 bg-white border border-gray-200 rounded-lg shadow-sm">
-              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0">
-                {/* Stock Statistics */}
-                <div className="grid grid-cols-2 md:grid-cols-7 gap-4">
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-green-600">
-                      {sortedProducts.filter(p => (p.current_stock || 0) > (p.min_stock || 5)).length}
-                    </div>
-                    <div className="text-sm text-gray-600">In Stock</div>
-                    <div className="text-xs text-gray-400">Green</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-orange-600">
-                      {sortedProducts.filter(p => (p.current_stock || 0) > 0 && (p.current_stock || 0) <= (p.min_stock || 5)).length}
-                    </div>
-                    <div className="text-sm text-gray-600">Low Stock</div>
-                    <div className="text-xs text-gray-400">Orange</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-red-600">
-                      {sortedProducts.filter(p => (p.current_stock || 0) === 0).length}
-                    </div>
-                    <div className="text-sm text-gray-600">Out of Stock</div>
-                    <div className="text-xs text-gray-400">Red</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-blue-600">
-                      {sortedProducts.length}
-                    </div>
-                    <div className="text-sm text-gray-600">Total Products</div>
-                    <div className="text-xs text-gray-400">All</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-emerald-600">
-                      {extendedProducts.filter(p => getUpdatedTimeline(p.updated_at) === 'today').length}
-                    </div>
-                    <div className="text-sm text-gray-600">Updated today</div>
-                    <div className="text-xs text-gray-400">Timeline</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-slate-600">
-                      {extendedProducts.filter(p => ['today', 'yesterday', 'last_week'].includes(getUpdatedTimeline(p.updated_at))).length}
-                    </div>
-                    <div className="text-sm text-gray-600">Last 7 days</div>
-                    <div className="text-xs text-gray-400">Timeline</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-purple-600">
-                      {formatCurrency(
-                        sortedProducts.reduce(
-                          (sum, p) => sum + (p.current_stock || 0) * (p.price || 0),
-                          0
-                        )
-                      )}
-                    </div>
-                    <div className="text-sm text-gray-600">Total Value</div>
-                    <div className="text-xs text-gray-400">Stock × price</div>
-                  </div>
-                </div>
-                
-                {/* Quick Export Options */}
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    icon={<Download className="w-4 h-4" />}
-                    onClick={handleExportAllProducts}
-                    className="whitespace-nowrap"
-                  >
-                    Export All ({sortedProducts.length})
-                  </Button>
-                  {hasActiveFilters && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      icon={<Download className="w-4 h-4" />}
-                      onClick={handleExportFilteredProducts}
-                      className="whitespace-nowrap"
-                    >
-                      Export Filtered ({sortedProducts.length})
-                    </Button>
-                  )}
-                </div>
-              </div>
-              
-              {/* Color Legend */}
-              <div className="mt-4 pt-4 border-t border-gray-200">
-                <div className="text-sm text-gray-600 mb-2">Color Legend:</div>
-                <div className="flex flex-wrap gap-3 text-xs">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-3 h-3 bg-green-500 rounded"></div>
-                    <span>In Stock (Above minimum stock level)</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-3 h-3 bg-yellow-500 rounded"></div>
-                    <span>Medium Stock (Above minimum but close to low)</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-3 h-3 bg-orange-500 rounded"></div>
-                    <span>Low Stock (At or below minimum stock level)</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-3 h-3 bg-red-500 rounded"></div>
-                    <span>Out of Stock (Zero stock)</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Debug Information (show when there's a discrepancy) */}
-          {sortedProducts.length > 0 && sortedProducts.length !== products.length && (
-            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="text-sm text-blue-800">
-                <strong>Debug Info:</strong> Showing {sortedProducts.length} of {products.length} products.
-                {filters.searchTerm && (
-                  <span> Search term: "{filters.searchTerm}"</span>
-                )}
-                <br />
-                Active filters: {Object.entries(filters).map(([key, value]) => {
-                  if (value === '' || value === 'all' || value === null) return null;
-                  if (typeof value === 'object') {
-                    if (key === 'priceRange' && (value.min > 0 || value.max < maxPrice)) {
-                      return `${key}: ${JSON.stringify(value)}`;
-                    }
-                    if (key === 'stockRange' && (value.min > 0 || value.max < maxStock)) {
-                      return `${key}: ${JSON.stringify(value)}`;
-                    }
-                    if (key !== 'priceRange' && key !== 'stockRange' && (value.min > 0 || value.max < 10000)) {
-                      return `${key}: ${JSON.stringify(value)}`;
-                    }
-                  }
-                  return null;
-                }).filter(Boolean).join(', ')}
-                <br />
-                Max stock in data: {maxStock}, Max price in data: {maxPrice}
-              </div>
-            </div>
-          )}
-
-          <Table
-            data={sortedProducts}
-            columns={columns}
-            rowActions={(product) => (
-              <div className="flex items-center justify-end space-x-2" onClick={(e) => e.stopPropagation()}>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={<Eye className="w-4 h-4" />}
-                  onClick={() => onViewProduct(product)}
-                  title="View Details"
-                />
-                {hasPermission('edit_product') && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={<Edit2 className="w-4 h-4" />}
-                    onClick={() => onEditProduct(product)}
-                    title="Edit Product"
-                  />
-                )}
-                {hasPermission('delete_product') && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    type="button"
-                    icon={<Trash2 className="w-4 h-4" />}
-                    onClick={() => onDeleteProduct(product.id)}
-                    title="Delete Product"
-                  />
-                )}
-              </div>
-            )}
-            emptyState={
-              <EmptyState
-                icon={<Package className="w-16 h-16" />}
-                title={hasActiveFilters ? "No products found" : "No products yet"}
-                description={
-                  hasActiveFilters 
-                    ? "Try adjusting your search criteria or filters to find what you're looking for."
-                    : hasPermission('add_product') 
-                      ? "Get started by adding your first product to the inventory."
-                      : "No products in inventory. Contact administrator for add product permission."
-                }
-                action={
-                  hasPermission('add_product') ? (
-                    <Button
-                      variant="primary"
-                      icon={<Plus className="w-4 h-4" />}
-                      onClick={onAddProduct}
-                    >
-                      Add Product
-                    </Button>
-                  ) : (
-                    <div className="text-sm text-gray-500">
-                      Contact administrator for add product permission
-                    </div>
-                  )
-                }
-              />
-            }
-          />
-        </PageSection>
-      </PageContainer>
-
-      {!showBulkPriceUpdate && (
-        <>
-          <button
-            type="button"
-            onClick={() => setShowFloatingSearch(true)}
-            className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg ring-1 ring-black/5 transition hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 md:bottom-8 md:right-8"
-            aria-label="Open product search"
-            title="Search products"
-          >
-            <Search className="h-6 w-6 shrink-0" aria-hidden />
-          </button>
-
-          {showFloatingSearch && (
-            <div
-              className="fixed inset-0 z-[45] flex flex-col justify-end sm:justify-center sm:pt-0 bg-black/50 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="floating-search-title"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget) setShowFloatingSearch(false);
-              }}
-            >
-              <div
-                className="mx-auto w-full max-w-lg rounded-xl bg-white shadow-xl border border-gray-200 max-h-[min(85vh,32rem)] flex flex-col"
-                onMouseDown={(e) => e.stopPropagation()}
-              >
-                <div className="flex items-center justify-between gap-2 border-b border-gray-200 px-4 py-3 shrink-0">
-                  <h2 id="floating-search-title" className="text-lg font-semibold text-gray-900">
-                    Search products
-                  </h2>
-                  <button
-                    type="button"
-                    onClick={() => setShowFloatingSearch(false)}
-                    className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                    aria-label="Close search"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-
-                <div className="p-4 overflow-y-auto flex-1 min-h-0 space-y-3">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
-                    <Input
-                      id="floating-product-search-input"
-                      type="text"
-                      placeholder="Name, code, brand, notes…"
-                      value={filters.searchTerm}
-                      onChange={(e) => handleSearch(e.target.value)}
-                      className="pl-10 pr-10"
-                      autoComplete="off"
-                    />
-                    {filters.searchTerm && (
-                      <button
-                        type="button"
-                        onClick={() => handleSearch('')}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                        aria-label="Clear search"
-                      >
-                        <X className="w-4 h-4" />
+                {showTools && (
+                  <div className="absolute right-0 z-20 mt-2 w-64 rounded-md border border-gray-200 bg-white p-1.5 shadow-lg">
+                    <button type="button" onClick={handleExportAll} className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                      <Download className="h-4 w-4 text-gray-500" /> Export all products
+                    </button>
+                    {hasActiveFilters && (
+                      <button type="button" onClick={handleExportFiltered} className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                        <Download className="h-4 w-4 text-gray-500" /> Export current results
                       </button>
                     )}
+                    <button type="button" onClick={() => downloadInStockInventoryPdf(extendedProducts)} className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                      <FileText className="h-4 w-4 text-gray-500" /> Download in-stock PDF
+                    </button>
+                    {hasPermission('edit_product') && (
+                      <>
+                        <div className="my-1 border-t border-gray-200" />
+                        <button type="button" onClick={() => setShowBulkPriceUpdate(true)} className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                          <Package className="h-4 w-4 text-gray-500" /> Update prices
+                        </button>
+                        <button type="button" disabled={zeroingStaleStock} onClick={handleZeroStockNotUpdated7Days} className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50">
+                          <RotateCcw className="h-4 w-4 text-gray-500" /> {zeroingStaleStock ? 'Updating stock...' : 'Zero stale stock'}
+                        </button>
+                      </>
+                    )}
                   </div>
-
-                  {searchSuggestions.length > 0 && filters.searchTerm && (
-                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-2">
-                      <div className="text-xs text-gray-500 mb-2 flex items-center">
-                        <Clock className="w-3 h-3 mr-1" />
-                        Suggestions
-                      </div>
-                      {searchSuggestions.map((suggestion, index) => (
-                        <button
-                          key={index}
-                          type="button"
-                          onClick={() => {
-                            handleSuggestionClick(suggestion);
-                            setShowFloatingSearch(false);
-                          }}
-                          className="block w-full text-left px-2 py-1.5 text-sm hover:bg-white rounded"
-                        >
-                          {suggestion}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {searchHistory.length > 0 && !filters.searchTerm && (
-                    <div className="flex flex-wrap gap-2">
-                      <span className="text-sm text-gray-500 flex items-center w-full">
-                        <Clock className="w-3 h-3 mr-1 shrink-0" />
-                        Recent searches
-                      </span>
-                      {searchHistory.map((term, index) => (
-                        <button
-                          key={index}
-                          type="button"
-                          onClick={() => {
-                            handleSuggestionClick(term);
-                            setShowFloatingSearch(false);
-                          }}
-                          className="text-sm bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded"
-                        >
-                          {term}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  <p className="text-xs text-gray-500">
-                    {sortedProducts.length} of {products.length} products match filters.
-                  </p>
-                </div>
-
-                <div className="border-t border-gray-200 px-4 py-3 shrink-0">
-                  <Button type="button" variant="primary" className="w-full" onClick={() => setShowFloatingSearch(false)}>
-                    Done
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Bulk Price Update Modal */}
-      {showBulkPriceUpdate && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Bulk Price Update</h3>
-              <button
-                onClick={() => setShowBulkPriceUpdate(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Update Type
-                </label>
-                <div className="flex space-x-4">
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      name="updateType"
-                      value="percentage"
-                      checked={bulkPriceUpdate.updateType === 'percentage'}
-                      onChange={(e) => setBulkPriceUpdate(prev => ({ ...prev, updateType: e.target.value as 'percentage' | 'fixed' }))}
-                      className="mr-2"
-                    />
-                    Percentage
-                  </label>
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      name="updateType"
-                      value="fixed"
-                      checked={bulkPriceUpdate.updateType === 'fixed'}
-                      onChange={(e) => setBulkPriceUpdate(prev => ({ ...prev, updateType: e.target.value as 'percentage' | 'fixed' }))}
-                      className="mr-2"
-                    />
-                    Fixed Amount
-                  </label>
-                </div>
-              </div>
-
-              {bulkPriceUpdate.updateType === 'percentage' ? (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Percentage Change (%)
-                  </label>
-                  <Input
-                    type="number"
-                    placeholder="e.g., 10 for +10%, -5 for -5%"
-                    value={bulkPriceUpdate.percentage}
-                    onChange={(e) => setBulkPriceUpdate(prev => ({ ...prev, percentage: parseFloat(e.target.value) || 0 }))}
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Positive for increase, negative for decrease (based on current prices)
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Set all unit prices to (TSh)
-                  </label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    placeholder="e.g., 25000 for TSh 25,000 per unit"
-                    value={bulkPriceUpdate.fixedAmount}
-                    onChange={(e) => setBulkPriceUpdate(prev => ({ ...prev, fixedAmount: parseFloat(e.target.value) || 0 }))}
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    This will replace ALL product prices with this exact amount
-                  </p>
-                </div>
-              )}
-
-              {/* Preview */}
-              <div className="bg-gray-50 p-3 rounded-lg">
-                <h4 className="text-sm font-medium text-gray-700 mb-2">Preview</h4>
-                <div className="text-xs text-gray-600 space-y-1">
-                  <div>Products to update: <strong>{extendedProducts.length}</strong></div>
-                  <div>Current inventory value: <strong>{formatCurrency(extendedProducts.reduce((sum, p) => sum + (p.current_stock || 0) * (p.price || 0), 0))}</strong></div>
-                  <div>New inventory value: <strong>{formatCurrency(extendedProducts.reduce((sum, p) => sum + (p.current_stock || 0) * calculateNewPrice(p.price || 0), 0))}</strong></div>
-                  <div>Change: <strong className={bulkPriceUpdate.updateType === 'percentage' ? (bulkPriceUpdate.percentage > 0 ? 'text-green-600' : 'text-red-600') : (bulkPriceUpdate.fixedAmount > 0 ? 'text-green-600' : 'text-red-600')}>
-                    {bulkPriceUpdate.updateType === 'percentage' 
-                      ? `${bulkPriceUpdate.percentage > 0 ? '+' : ''}${bulkPriceUpdate.percentage}%`
-                      : `Set all unit prices to ${formatCurrency(bulkPriceUpdate.fixedAmount)}`
-                    }
-                  </strong></div>
-                </div>
-              </div>
-
-              <div className="flex space-x-3 pt-4">
-                <Button
-                  variant="outline"
-                  onClick={() => setShowBulkPriceUpdate(false)}
-                  className="flex-1"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  onClick={handleBulkPriceUpdate}
-                  className="flex-1"
-                  disabled={
-                    (bulkPriceUpdate.updateType === 'percentage' && (bulkPriceUpdate.percentage === 0 || bulkPriceUpdate.percentage < -100)) ||
-                    (bulkPriceUpdate.updateType === 'fixed' && bulkPriceUpdate.fixedAmount === 0)
-                  }
-                >
-                  Update All Prices
-                </Button>
+                )}
               </div>
             </div>
           </div>
+
+          {showFilters && (
+            <div className="grid gap-3 border-t border-gray-200 pt-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Select
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
+                options={[{ value: 'all', label: 'All categories' }, ...categories.map((value) => ({ value, label: value }))]}
+                aria-label="Filter by category"
+              />
+              <Select
+                value={productTypeFilter}
+                onChange={(event) => setProductTypeFilter(event.target.value)}
+                options={[{ value: 'all', label: 'All product types' }, ...productTypes.map((value) => ({ value, label: value }))]}
+                aria-label="Filter by product type"
+              />
+              <Select
+                value={brandFilter}
+                onChange={(event) => setBrandFilter(event.target.value)}
+                options={[{ value: 'all', label: 'All brands' }, ...brands.map((value) => ({ value, label: value }))]}
+                aria-label="Filter by brand"
+              />
+              <div className="flex gap-2">
+                <Select
+                  value={sortField}
+                  onChange={(event) => setSortField(event.target.value as SortField)}
+                  options={sortOptions}
+                  className="min-w-0 flex-1"
+                  aria-label="Sort products"
+                />
+                <button
+                  type="button"
+                  onClick={() => setSortDirection((direction) => direction === 'asc' ? 'desc' : 'asc')}
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50"
+                  title={sortDirection === 'asc' ? 'Ascending' : 'Descending'}
+                >
+                  {sortDirection === 'asc' ? <ArrowDownAZ className="h-4 w-4" /> : <ArrowUpAZ className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex min-h-6 items-center justify-between gap-3 text-sm">
+            <span className="text-gray-500">Showing {filteredProducts.length} of {products.length}</span>
+            {hasActiveFilters && (
+              <button type="button" onClick={clearFilters} className="font-medium text-emerald-700 hover:text-emerald-800">Clear filters</button>
+            )}
+          </div>
         </div>
-      )}
+
+        {filteredProducts.length === 0 ? (
+          <EmptyState
+            icon={<Package className="h-8 w-8" />}
+            title={products.length ? 'No matching products' : 'No products yet'}
+            description={products.length ? 'Try changing your search or filters.' : 'Add your first product to start tracking inventory.'}
+            action={products.length ? <Button variant="outline" onClick={clearFilters}>Clear filters</Button> : undefined}
+          />
+        ) : (
+          <>
+            <div className="divide-y divide-gray-200 lg:hidden">
+              {filteredProducts.map((product) => {
+                const stock = stockPresentation(product);
+                return (
+                  <article
+                    key={product.id}
+                    data-row-id={product.id}
+                    onClick={() => onViewProduct(product)}
+                    className="cursor-pointer p-4 transition-colors hover:bg-gray-50"
+                  >
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <h2 className="truncate text-sm font-semibold text-gray-900">{product.commercial_name}</h2>
+                        <p className="mt-0.5 truncate text-xs text-gray-500">{product.code} · {product.item_number || 'No item number'}</p>
+                      </div>
+                      <ProductActions product={product} />
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-3">
+                      <div>
+                        <p className="text-xs text-gray-500">Stock</p>
+                        <p className="mt-0.5 text-sm font-semibold text-gray-900">{product.current_stock || 0}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Price</p>
+                        <p className="mt-0.5 truncate text-sm font-semibold text-gray-900">{formatCurrency(product.price || 0)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Status</p>
+                        <span className={`mt-1 inline-flex items-center gap-1.5 rounded border px-2 py-0.5 text-xs font-medium ${stock.className}`}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${stock.dot}`} /> {stock.label}
+                        </span>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+
+            <div className="hidden overflow-x-auto lg:block">
+              <table className="w-full min-w-[900px] table-fixed">
+                <thead className="border-b border-gray-200 bg-gray-50">
+                  <tr className="text-left text-xs font-medium uppercase text-gray-500">
+                    <th className="w-[30%] px-4 py-3">Product</th>
+                    <th className="w-[16%] px-4 py-3">Type</th>
+                    <th className="w-[12%] px-4 py-3">Stock</th>
+                    <th className="w-[14%] px-4 py-3">Status</th>
+                    <th className="w-[14%] px-4 py-3">Price</th>
+                    <th className="w-[14%] px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {filteredProducts.map((product) => {
+                    const stock = stockPresentation(product);
+                    return (
+                      <tr key={product.id} data-row-id={product.id} onClick={() => onViewProduct(product)} className="cursor-pointer hover:bg-gray-50">
+                        <td className="px-4 py-3">
+                          <p className="truncate text-sm font-semibold text-gray-900">{product.commercial_name}</p>
+                          <p className="mt-0.5 truncate text-xs text-gray-500">{product.code} · {product.item_number || 'No item number'}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <p className="truncate text-sm text-gray-700">{product.product_type || 'Unspecified'}</p>
+                          <p className="truncate text-xs text-gray-500">{product.category || 'No category'}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <p className="text-sm font-semibold text-gray-900">{product.current_stock || 0}</p>
+                          <p className="text-xs text-gray-500">Min {product.min_stock || 0}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center gap-1.5 rounded border px-2 py-1 text-xs font-medium ${stock.className}`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${stock.dot}`} /> {stock.label}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm font-semibold text-gray-900">{formatCurrency(product.price || 0)}</td>
+                        <td className="px-4 py-3"><ProductActions product={product} /></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </section>
+
+      <Modal
+        isOpen={showBulkPriceUpdate}
+        onClose={() => setShowBulkPriceUpdate(false)}
+        title="Update product prices"
+        size="sm"
+        footer={(
+          <>
+            <Button variant="outline" onClick={() => setShowBulkPriceUpdate(false)}>Cancel</Button>
+            <Button onClick={handleBulkPriceUpdate}>Update prices</Button>
+          </>
+        )}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">This change applies to all {products.length} products.</p>
+          <Select
+            value={bulkPriceUpdate.updateType}
+            onChange={(event) => setBulkPriceUpdate((value) => ({ ...value, updateType: event.target.value as 'percentage' | 'fixed' }))}
+            options={[
+              { value: 'percentage', label: 'Increase or decrease by percentage' },
+              { value: 'fixed', label: 'Set one fixed price' }
+            ]}
+          />
+          <Input
+            type="number"
+            value={bulkPriceUpdate.updateType === 'percentage' ? bulkPriceUpdate.percentage : bulkPriceUpdate.fixedAmount}
+            onChange={(event) => {
+              const amount = Number(event.target.value);
+              setBulkPriceUpdate((value) => value.updateType === 'percentage'
+                ? { ...value, percentage: amount }
+                : { ...value, fixedAmount: amount });
+            }}
+            placeholder={bulkPriceUpdate.updateType === 'percentage' ? 'Percentage, for example 10' : 'New price'}
+          />
+        </div>
+      </Modal>
     </div>
   );
 };

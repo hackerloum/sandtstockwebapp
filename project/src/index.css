@@ -42,3 +42,51 @@
     color: #064e3b;
   }
 }
+
+@layer components {
+  .app-shell-main,
+  .app-shell-main > * {
+    min-width: 0;
+  }
+
+  .app-shell-main .rounded-xl,
+  .app-shell-main .rounded-2xl,
+  .app-shell-main .rounded-3xl {
+    border-radius: 0.375rem;
+  }
+
+  .app-shell-main .tracking-wider,
+  .app-shell-main .tracking-wide,
+  .app-shell-main .tracking-tight {
+    letter-spacing: 0;
+  }
+
+  .app-shell-main .shadow-sm {
+    box-shadow: none;
+  }
+
+  .app-shell-main button.bg-blue-600 {
+    background-color: #047857 !important;
+  }
+
+  .app-shell-main button.bg-blue-600:hover {
+    background-color: #065f46 !important;
+  }
+
+  .app-shell-main input,
+  .app-shell-main select,
+  .app-shell-main textarea {
+    min-width: 0;
+    border-radius: 0.375rem;
+  }
+
+  @media (max-width: 767px) {
+    .app-shell-main .p-6 {
+      padding: 1rem;
+    }
+
+    .app-shell-main .gap-6 {
+      gap: 1rem;
+    }
+  }
+}

@@ -52,7 +52,7 @@ export function Table<T extends { id: string }>({
   if (isLoading) {
     return (
       <div className="animate-pulse">
-        <div className="h-10 bg-gray-200 rounded-t-lg mb-1" />
+        <div className="h-10 bg-gray-200 rounded-t-md mb-1" />
         {[...Array(5)].map((_, i) => (
           <div key={i} className="h-16 bg-gray-100 mb-1" />
         ))}
@@ -65,8 +65,8 @@ export function Table<T extends { id: string }>({
   }
 
   return (
-    <div className="w-full min-w-0 overflow-hidden">
-      <table className="table-fixed w-full divide-y divide-gray-200">
+    <div className="w-full min-w-0 overflow-x-auto">
+      <table className="w-full min-w-[720px] table-fixed divide-y divide-gray-200">
         <thead className="bg-gray-50">
           <tr>
             {onSelectRow && (
@@ -82,7 +82,7 @@ export function Table<T extends { id: string }>({
             {columns.map((column) => (
               <th
                 key={column.key}
-                className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  className="px-3 py-3 text-left text-xs font-medium uppercase text-gray-500"
                 style={column.width ? { width: column.width } : undefined}
               >
                 {column.sortable ? (

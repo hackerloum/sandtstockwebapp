@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Package, Scissors, Gift, Settings } from 'lucide-react';
+import { Package, Scissors, Gift, Settings } from 'lucide-react';
 import { Product, Brand, Supplier, ProductType } from '../types';
 import { FragranceBottleForm, CrimpForm, AccessoriesForm, PackagingForm } from './forms';
-import { PageHeader, PageContainer } from './shared/PageLayout';
-import { Button } from './shared/Button';
+import { PageHeader } from './shared/PageLayout';
 
 interface AddProductPageProps {
   onSave: (product: Omit<Product, 'id' | 'created_at' | 'updated_at'>) => void;
@@ -14,9 +13,7 @@ interface AddProductPageProps {
 
 export const AddProductPage: React.FC<AddProductPageProps> = ({
   onSave,
-  onBack,
-  brands,
-  suppliers
+  onBack
 }) => {
   const [selectedProductType, setSelectedProductType] = useState<ProductType | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -116,71 +113,49 @@ export const AddProductPage: React.FC<AddProductPageProps> = ({
   };
 
   return (
-      <PageContainer>
+      <div className="space-y-5">
         <PageHeader
           title={`Add New ${selectedProductType}`}
           subtitle={`Create a new ${selectedProductType.toLowerCase()} product`}
-          backButton={
-            <Button variant="outline" onClick={handleBackToSelection} icon={ArrowLeft}>
-              Back to Product Type Selection
-            </Button>
-          }
+          onBack={handleBackToSelection}
         />
         
         {renderForm()}
-      </PageContainer>
+      </div>
     );
   }
 
   return (
-    <PageContainer>
+    <div className="space-y-5">
       <PageHeader
         title="Add New Product"
-        subtitle="Select the type of product you want to add"
-        backButton={
-          <Button variant="outline" onClick={onBack} icon={ArrowLeft}>
-            Back to Products
-          </Button>
-        }
+        subtitle="Choose a product type to continue"
+        onBack={onBack}
       />
       
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mt-8">
+      <section className="rounded-md border border-gray-200 bg-white p-4 sm:p-6">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
          {productTypeOptions.map((option) => {
            const IconComponent = option.icon;
            return (
-             <div
+             <button
+               type="button"
                key={option.type}
-               className={`p-6 border-2 rounded-xl cursor-pointer transition-all duration-200 hover:scale-105 hover:shadow-lg ${option.color}`}
+               className={`min-h-36 rounded-md border p-5 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 ${option.color}`}
                onClick={() => {
-                 console.log('Product type selected:', option.type);
                  handleProductTypeSelect(option.type);
                }}
-               onKeyDown={(e) => {
-                 if (e.key === 'Enter' || e.key === ' ') {
-                   e.preventDefault();
-                   handleProductTypeSelect(option.type);
-                 }
-               }}
-               tabIndex={0}
-               role="button"
-               aria-label={`Select ${option.type} product type`}
              >
-               <div className="flex flex-col items-center text-center space-y-4">
-                 <div className="p-3 bg-white rounded-full shadow-sm">
-                   <IconComponent className="w-8 h-8" />
-                </div>
-                <div>
-                   <h3 className="text-lg font-semibold mb-2">{option.type}</h3>
-                   <p className="text-sm opacity-80">{option.description}</p>
-                </div>
-                 <div className="text-xs text-gray-600 mt-2">
-                   Click to select
-              </div>
-            </div>
-          </div>
+               <span className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-current/10 bg-white/80">
+                 <IconComponent className="h-5 w-5" />
+               </span>
+               <span className="mt-4 block text-base font-semibold">{option.type}</span>
+               <span className="mt-1 block text-sm leading-5 opacity-80">{option.description}</span>
+             </button>
            );
          })}
         </div>
-    </PageContainer>
+      </section>
+    </div>
   );
 };

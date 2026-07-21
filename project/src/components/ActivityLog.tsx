@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Activity, Search, Filter, User, Calendar, Eye } from 'lucide-react';
+import { Activity, Search, User, Calendar, Eye } from 'lucide-react';
 import { ActivityLog } from '../types';
 import { formatDate } from '../utils/stockUtils';
 import { useAuth } from '../contexts/AuthContext';
+import { PageHeader } from './shared/PageLayout';
 
 interface ActivityLogProps {
   activities: ActivityLog[];
@@ -94,14 +95,15 @@ export const ActivityLogComponent: React.FC<ActivityLogProps> = ({ activities })
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-900">Activity Log</h2>
-        <div className="flex items-center space-x-2">
+    <div className="space-y-5">
+      <PageHeader
+        title="Activity log"
+        subtitle="Review changes and actions across the app"
+        actions={<div className="flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2">
           <Activity className="w-6 h-6 text-gray-600" />
           <span className="text-sm text-gray-600">{filteredActivities.length} activities</span>
-        </div>
-      </div>
+        </div>}
+      />
 
       {/* Filters */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">

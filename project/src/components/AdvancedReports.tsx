@@ -3,6 +3,7 @@ import { BarChart3, TrendingUp, TrendingDown, Download, DollarSign, Package, Fil
 import { Product, Order, StockMovement, PurchaseOrder } from '../types';
 import { formatCurrency, formatDate } from '../utils/stockUtils';
 import { useAuth } from '../contexts/AuthContext';
+import { PageHeader } from './shared/PageLayout';
 
 interface AdvancedReportsProps {
   products: Product[];
@@ -235,14 +236,16 @@ export const AdvancedReports: React.FC<AdvancedReportsProps> = ({
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-900">Advanced Reports & Analytics</h2>
-        <div className="flex items-center space-x-4">
+    <div className="space-y-5">
+      <PageHeader
+        title="Reports and analytics"
+        subtitle="Review sales, inventory, purchasing, and stock movement performance"
+        actions={
+        <div className="flex flex-wrap items-center gap-2">
           <select
             value={reportType}
             onChange={(e) => setReportType(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="min-h-9 rounded-md border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-emerald-600 focus:border-transparent"
           >
             <option value="overview">Overview</option>
             <option value="inventory">Inventory Analysis</option>
@@ -253,7 +256,7 @@ export const AdvancedReports: React.FC<AdvancedReportsProps> = ({
           <select
             value={dateRange}
             onChange={(e) => setDateRange(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="min-h-9 rounded-md border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-emerald-600 focus:border-transparent"
           >
             <option value="7">Last 7 days</option>
             <option value="30">Last 30 days</option>
@@ -262,20 +265,21 @@ export const AdvancedReports: React.FC<AdvancedReportsProps> = ({
           </select>
           <button
             onClick={exportReport}
-            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors"
+            className="flex min-h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-700 transition-colors hover:bg-gray-50"
           >
             <Download className="w-4 h-4" />
             <span>JSON</span>
           </button>
           <button
             onClick={exportToCSV}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors"
+            className="flex min-h-9 items-center gap-2 rounded-md bg-emerald-700 px-3 py-2 text-white transition-colors hover:bg-emerald-800"
           >
             <FileText className="w-4 h-4" />
             <span>CSV</span>
           </button>
         </div>
-      </div>
+        }
+      />
 
       {/* Key Metrics Dashboard */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -375,7 +379,7 @@ export const AdvancedReports: React.FC<AdvancedReportsProps> = ({
             {/* Top 3 Summary */}
             {analytics.topProducts.length > 0 && (
               <div className="mb-4 p-3 bg-blue-50 rounded-lg">
-                <h4 className="text-sm font-medium text-blue-900 mb-2">🏆 Top Performers</h4>
+                <h4 className="mb-2 text-sm font-medium text-gray-900">Top performers</h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   {analytics.topProducts.slice(0, 3).map((product: any, index: number) => (
                     <div key={product.productId} className="text-center p-2 bg-white rounded border">
@@ -390,9 +394,6 @@ export const AdvancedReports: React.FC<AdvancedReportsProps> = ({
             )}
             
             <div className="space-y-3 max-h-96 overflow-y-auto">
-              <div className="text-xs text-gray-500 mb-2">
-                Showing {analytics.topProducts.length} products (sorted by {sortBy === 'revenue' ? 'revenue' : 'quantity sold'})
-              </div>
               {analytics.topProducts.map((product: any, index: number) => (
                 <div key={product.productId} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
                   <div className="flex items-center space-x-3 flex-1">
@@ -402,7 +403,6 @@ export const AdvancedReports: React.FC<AdvancedReportsProps> = ({
                     <div className="flex-1">
                       <p className="font-medium text-gray-900">{product.productName}</p>
                       <div className="flex items-center space-x-4 mt-1">
-                        <p className="text-xs text-gray-500">ID: {product.productId}</p>
                         <p className="text-xs text-gray-500">Sold: <span className="font-medium text-green-600">{product.quantitySold}</span></p>
                       </div>
                     </div>

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Search, Filter, Eye, CheckCircle, XCircle, Clock, Plus } from 'lucide-react';
-import { ProductReport } from '../types';
-import { getProductReports, updateProductReportStatus, testProductReportsConnection, checkUserPermissions, testFetchUser } from '../lib/supabase';
-import { formatCurrency, formatDate } from '../utils/stockUtils';
+import { FileText, Filter, Plus } from 'lucide-react';
+import { Product, ProductReport } from '../types';
+import { getProductReports, testProductReportsConnection, checkUserPermissions, testFetchUser } from '../lib/supabase';
+import { formatDate } from '../utils/stockUtils';
 import { PageHeader, PageContainer, PageSection, EmptyState } from './shared/PageLayout';
 import { Button } from './shared/Button';
 import { Table } from './shared/Table';
@@ -10,7 +10,7 @@ import { Input, Select } from './shared/Form';
 import { ProductReportForm } from './ProductReportForm';
 
 interface ProductReportsProps {
-  products: any[];
+  products: Product[];
 }
 
 export const ProductReports: React.FC<ProductReportsProps> = ({ products }) => {
@@ -148,42 +148,24 @@ export const ProductReports: React.FC<ProductReportsProps> = ({ products }) => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <PageHeader
-        title="Product Reports"
+        title="Product reports"
         subtitle="Manage product addition and removal requests"
+        actions={
+          <Button
+            variant="primary"
+            icon={<Plus className="w-4 h-4" />}
+            onClick={() => setShowForm(true)}
+          >
+            New report
+          </Button>
+        }
       />
 
-      {/* Debug Info */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-        <h3 className="text-sm font-medium text-blue-800 mb-2">Debug Info</h3>
-        <p className="text-sm text-blue-700">Total reports: {reports.length}</p>
-        <p className="text-sm text-blue-700">Loading: {loading ? 'Yes' : 'No'}</p>
-        <p className="text-sm text-blue-700">Filtered reports: {filteredReports.length}</p>
-        {reports.length > 0 && (
-          <div className="mt-2">
-            <p className="text-sm text-blue-700">Sample report:</p>
-            <pre className="text-xs text-blue-600 bg-blue-100 p-2 rounded mt-1 overflow-auto">
-              {JSON.stringify(reports[0], null, 2)}
-            </pre>
-          </div>
-        )}
-      </div>
-
       <PageContainer>
-        <PageSection>
-          <div className="bg-white rounded-lg border p-4 mb-6">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-medium text-gray-900">Filters</h3>
-              <Button
-                variant="primary"
-                icon={<Plus className="w-4 h-4" />}
-                onClick={() => setShowForm(true)}
-              >
-                Submit New Report
-              </Button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <PageSection title="Requests" description={`${filteredReports.length} of ${reports.length} reports`}>
+            <div className="mb-5 grid grid-cols-1 gap-3 border-b border-gray-200 pb-5 md:grid-cols-3">
                              <Input
                  type="text"
                  placeholder="Search reports..."
@@ -208,13 +190,9 @@ export const ProductReports: React.FC<ProductReportsProps> = ({ products }) => {
                   setStatusFilter('all');
                 }}
               >
-                Clear Filters
+                Clear filters
               </Button>
             </div>
-          </div>
-        </PageSection>
-
-        <PageSection>
           <Table
             data={filteredReports}
             columns={columns}
@@ -230,4 +208,4 @@ export const ProductReports: React.FC<ProductReportsProps> = ({ products }) => {
       </PageContainer>
     </div>
   );
-}; 
+};

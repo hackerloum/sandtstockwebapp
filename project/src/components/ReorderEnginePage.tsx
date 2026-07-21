@@ -52,7 +52,7 @@ export const ReorderEnginePage: React.FC<ReorderEnginePageProps> = ({
     <div>
       <PageHeader
         title="Reorder engine"
-        subtitle="Full list: stock-outs and sales orders by timeline. Order now is sorted by recent demand first. Suggested quantities scale with demand (up to 100 units per SKU when headroom allows). Use PDF per column for printable lists."
+        subtitle="Demand-based replenishment priorities across your inventory"
         onBack={onBack}
       />
 
