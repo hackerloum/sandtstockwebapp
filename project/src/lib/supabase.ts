@@ -35,8 +35,9 @@ function mapOrderItemRowFromQuery(item: Record<string, unknown>) {
     : '';
 
   const qty = Math.max(0, Math.floor(toMoneyNumber(item.quantity, 0)));
-  let unit_price = toMoneyNumber(item.unit_price, 0);
+  let unit_price = toMoneyNumber(item.unit_price, 0) || toMoneyNumber(item.original_unit_price, 0);
   let total_price = toMoneyNumber(item.total_price, 0);
+  const customName = String(item.custom_product_name ?? '').trim();
 
   if (unit_price === 0 && total_price > 0 && qty > 0) {
     unit_price = Math.round((total_price / qty) * 100) / 100;
@@ -47,8 +48,8 @@ function mapOrderItemRowFromQuery(item: Record<string, unknown>) {
 
   return {
     id: item.id as string,
-    product_id: item.product_id as string,
-    product_name: nameFromJoin || 'Unknown Product',
+    product_id: String(item.product_id ?? ''),
+    product_name: nameFromJoin || customName || 'Unknown Product',
     quantity: qty,
     unit_price,
     total_price
@@ -481,6 +482,10 @@ export const getOrders = async () => {
               quantity,
               unit_price,
               total_price,
+              custom_product_name,
+              custom_product_description,
+              is_custom_product,
+              original_unit_price,
               product:products(code, commercial_name)
             )
           `)
@@ -533,6 +538,10 @@ export const getOrders = async () => {
               quantity,
               unit_price,
               total_price,
+              custom_product_name,
+              custom_product_description,
+              is_custom_product,
+              original_unit_price,
               product:products(code, commercial_name)
             )
           `)
@@ -575,6 +584,10 @@ export const getOrders = async () => {
           quantity,
           unit_price,
           total_price,
+          custom_product_name,
+          custom_product_description,
+          is_custom_product,
+          original_unit_price,
           product:products(code, commercial_name)
         )
       `)

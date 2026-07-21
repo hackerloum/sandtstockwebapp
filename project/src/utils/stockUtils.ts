@@ -945,7 +945,13 @@ export function resolveOrderItemsForDisplay(order: Order, products: Product[]): 
       : undefined;
     const embedded = embeddedProductLine(row);
 
-    const nameFromLine = String(r.product_name ?? r.productName ?? '').trim();
+    const nameFromLine = String(
+      r.product_name ??
+      r.productName ??
+      row.custom_product_name ??
+      row.customProductName ??
+      ''
+    ).trim();
     const product_name = (
       fromCatalog?.commercial_name?.trim() ||
       embedded.name ||
@@ -965,7 +971,9 @@ export function resolveOrderItemsForDisplay(order: Order, products: Product[]): 
       'list_price',
       'price',
       'unit_price_tz',
-      'unitPriceTz'
+      'unitPriceTz',
+      'original_unit_price',
+      'originalUnitPrice'
     ]);
     let total_price = pickLineMoney(row, [
       'total_price',

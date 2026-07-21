@@ -1,7 +1,13 @@
 import React, { useState } from 'react';
-import { Plus, Search, Eye, Edit2, Trash2, ShoppingCart, User, Calendar, DollarSign } from 'lucide-react';
+import { Plus, Search, Eye, Edit2, Trash2, ShoppingCart } from 'lucide-react';
 import { Order, Product, OrderItem } from '../types';
-import { generateOrderNumber, formatCurrency, formatDate } from '../utils/stockUtils';
+import {
+  generateOrderNumber,
+  formatCurrency,
+  formatDate,
+  resolveOrderGrandTotal,
+  resolveOrderItemsForDisplay
+} from '../utils/stockUtils';
 
 interface OrderManagementProps {
   orders: Order[];
@@ -466,6 +472,9 @@ interface OrderDetailModalProps {
 }
 
 const OrderDetailModal: React.FC<OrderDetailModalProps> = ({ order, products, onClose, onUpdateStatus }) => {
+  const displayItems = resolveOrderItemsForDisplay(order, products);
+  const orderGrandTotal = resolveOrderGrandTotal(order);
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -516,17 +525,17 @@ const OrderDetailModal: React.FC<OrderDetailModalProps> = ({ order, products, on
           <div>
             <h3 className="text-lg font-medium text-gray-900 mb-3">Order Items</h3>
             <div className="space-y-2">
-              {order.items.map((item) => (
-                <div key={item.productId} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+              {displayItems.map((item) => (
+                <div key={item.key} className="flex justify-between items-center gap-4 p-3 bg-gray-50 rounded-lg">
                   <div>
-                    <p className="font-medium">{item.productName}</p>
-                    <p className="text-sm text-gray-600">Quantity: {item.quantity} × {formatCurrency(item.unitPrice)}</p>
+                    <p className="font-medium">{item.product_name}</p>
+                    <p className="text-sm text-gray-600">Quantity: {item.quantity} x {formatCurrency(item.unit_price)}</p>
                   </div>
-                  <p className="font-medium">{formatCurrency(item.totalPrice)}</p>
+                  <p className="font-medium">{formatCurrency(item.total_price)}</p>
                 </div>
               ))}
               <div className="text-right pt-2 border-t border-gray-200">
-                <p className="text-xl font-bold">Total: {formatCurrency(order.total_amount)}</p>
+                <p className="text-xl font-bold">Total: {formatCurrency(orderGrandTotal)}</p>
               </div>
             </div>
           </div>
