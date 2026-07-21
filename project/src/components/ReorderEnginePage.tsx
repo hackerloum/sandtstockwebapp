@@ -56,8 +56,8 @@ export const ReorderEnginePage: React.FC<ReorderEnginePageProps> = ({
         onBack={onBack}
       />
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+        <section className="overflow-hidden rounded-md border border-gray-200 bg-white p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
             <div className="flex items-center gap-2 min-w-0">
               <Zap className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -85,11 +85,11 @@ export const ReorderEnginePage: React.FC<ReorderEnginePageProps> = ({
           {reorderPlan.orderNow.length === 0 ? (
             <p className="text-sm text-gray-500">None.</p>
           ) : (
-            <ul className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+            <ul className="divide-y divide-gray-200 xl:max-h-[70vh] xl:overflow-y-auto">
               {reorderPlan.orderNow.map((row) => (
                 <li
                   key={row.product.id}
-                  className="rounded-lg bg-white border border-emerald-100 p-3 text-sm"
+                  className="py-3 text-sm"
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-medium text-gray-900">{row.product.commercial_name}</p>
@@ -129,7 +129,7 @@ export const ReorderEnginePage: React.FC<ReorderEnginePageProps> = ({
                     <button
                       type="button"
                       onClick={() => onCreatePurchaseOrder(row.product.id)}
-                      className="mt-2 w-full px-3 py-1.5 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                      className="mt-3 w-full rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800"
                     >
                       Create purchase order
                     </button>
@@ -138,9 +138,9 @@ export const ReorderEnginePage: React.FC<ReorderEnginePageProps> = ({
               ))}
             </ul>
           )}
-        </div>
+        </section>
 
-        <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+        <section className="overflow-hidden rounded-md border border-gray-200 bg-white p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
             <div className="flex items-center gap-2 min-w-0">
               <TrendingUp className="w-4 h-4 text-amber-700 shrink-0" />
@@ -166,11 +166,11 @@ export const ReorderEnginePage: React.FC<ReorderEnginePageProps> = ({
           {reorderPlan.prioritizeReorder.length === 0 ? (
             <p className="text-sm text-gray-500">None.</p>
           ) : (
-            <ul className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+            <ul className="divide-y divide-gray-200 xl:max-h-[70vh] xl:overflow-y-auto">
               {reorderPlan.prioritizeReorder.map((row) => (
                 <li
                   key={row.product.id}
-                  className="rounded-lg bg-white border border-amber-100 p-3 text-sm"
+                  className="py-3 text-sm"
                 >
                   <p className="font-medium text-gray-900">{row.product.commercial_name}</p>
                   <p className="text-gray-600 mt-1">
@@ -198,7 +198,7 @@ export const ReorderEnginePage: React.FC<ReorderEnginePageProps> = ({
                     <button
                       type="button"
                       onClick={() => onCreatePurchaseOrder(row.product.id)}
-                      className="mt-2 w-full px-3 py-1.5 text-sm font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700"
+                      className="mt-3 w-full rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800"
                     >
                       Create purchase order
                     </button>
@@ -207,9 +207,9 @@ export const ReorderEnginePage: React.FC<ReorderEnginePageProps> = ({
               ))}
             </ul>
           )}
-        </div>
+        </section>
 
-        <div className="rounded-xl border border-slate-300 bg-slate-50 p-4">
+        <section className="overflow-hidden rounded-md border border-gray-200 bg-white p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
             <div className="flex items-center gap-2 min-w-0">
               <Ban className="w-4 h-4 text-slate-600 shrink-0" />
@@ -241,11 +241,11 @@ export const ReorderEnginePage: React.FC<ReorderEnginePageProps> = ({
           {reorderPlan.reviewBeforeOrder.length === 0 ? (
             <p className="text-sm text-gray-500">None.</p>
           ) : (
-            <ul className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+            <ul className="divide-y divide-gray-200 xl:max-h-[70vh] xl:overflow-y-auto">
               {reorderPlan.reviewBeforeOrder.map((row) => (
                 <li
                   key={row.product.id}
-                  className="rounded-lg bg-white border border-slate-200 p-3 text-sm"
+                  className="py-3 text-sm"
                 >
                   <p className="font-medium text-gray-900">{row.product.commercial_name}</p>
                   <p className="text-gray-600 mt-1">
@@ -276,7 +276,7 @@ export const ReorderEnginePage: React.FC<ReorderEnginePageProps> = ({
               ))}
             </ul>
           )}
-        </div>
+        </section>
       </div>
     </div>
   );

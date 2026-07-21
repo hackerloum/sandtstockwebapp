@@ -1070,10 +1070,14 @@ export const createPurchaseOrder = async (
 
   if (poError) throw poError;
 
-  const poItems = items.map(item => ({
-    ...item,
-    po_id: poData.id
-  }));
+    const poItems = items.map(item => ({
+      po_id: poData.id,
+      product_id: item.product_id,
+      quantity: item.quantity,
+      received_quantity: item.received_quantity ?? 0,
+      unit_price: item.unit_price,
+      total_price: item.total_price
+    }));
 
   const { error: itemsError } = await supabase
     .from('purchase_order_items')

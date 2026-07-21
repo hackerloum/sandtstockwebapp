@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, FileUp, Loader2, Save } from 'lucide-react';
 import { Product, UpcomingInvoice } from '../types';
 import {
@@ -56,7 +56,7 @@ export const UpcomingInvoicesPage: React.FC<UpcomingInvoicesPageProps> = ({ prod
   const [info, setInfo] = useState<string | null>(null);
   const [manualRawText, setManualRawText] = useState('');
 
-  const toErrorMessage = (err: unknown, fallback: string) => {
+  const toErrorMessage = useCallback((err: unknown, fallback: string) => {
     if (err instanceof Error && err.message) return err.message;
     if (err && typeof err === 'object') {
       const anyErr = err as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
@@ -66,9 +66,9 @@ export const UpcomingInvoicesPage: React.FC<UpcomingInvoicesPageProps> = ({ prod
       if (pieces.length > 0) return pieces.join(' — ');
     }
     return fallback;
-  };
+  }, []);
 
-  const loadInvoices = async () => {
+  const loadInvoices = useCallback(async () => {
     setLoadingInvoices(true);
     setError(null);
     try {
@@ -79,11 +79,11 @@ export const UpcomingInvoicesPage: React.FC<UpcomingInvoicesPageProps> = ({ prod
     } finally {
       setLoadingInvoices(false);
     }
-  };
+  }, [toErrorMessage]);
 
   React.useEffect(() => {
     void loadInvoices();
-  }, []);
+  }, [loadInvoices]);
 
   const applyDraft = (nextDraft: ParsedInvoiceDraft) => {
     setDraft(nextDraft);
@@ -180,9 +180,9 @@ export const UpcomingInvoicesPage: React.FC<UpcomingInvoicesPageProps> = ({ prod
         onBack={onBack}
       />
 
-      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+      <section className="space-y-4 rounded-md border border-gray-200 bg-white p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <label className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-blue-200 bg-blue-50 text-blue-800 cursor-pointer hover:bg-blue-100">
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50">
             <FileUp className="w-4 h-4" />
             <span className="text-sm font-medium">Upload invoice PDF</span>
             <input
@@ -211,7 +211,7 @@ export const UpcomingInvoicesPage: React.FC<UpcomingInvoicesPageProps> = ({ prod
             value={manualRawText}
             onChange={(e) => setManualRawText(e.target.value)}
             rows={6}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-emerald-600 focus:ring-emerald-600"
             placeholder="Paste raw invoice text if PDF extraction fails..."
           />
           <button
@@ -220,31 +220,31 @@ export const UpcomingInvoicesPage: React.FC<UpcomingInvoicesPageProps> = ({ prod
               if (!manualRawText.trim()) return;
               applyDraft(parseUpcomingInvoiceText(manualRawText));
             }}
-            className="mt-2 px-3 py-1.5 text-sm rounded-lg border border-gray-300 hover:bg-gray-50"
+            className="mt-2 rounded-md border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
           >
             Parse pasted text
           </button>
         </div>
 
         {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 px-3 py-2 text-sm">{error}</div>
+          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
         )}
         {info && (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 px-3 py-2 text-sm">
+          <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
             {info}
           </div>
         )}
-      </div>
+      </section>
 
       {draft && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+        <section className="space-y-4 rounded-md border border-gray-200 bg-white p-4 sm:p-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             <label className="flex flex-col gap-1">
               <span className="text-gray-600">Reference</span>
               <input
                 value={draft.reference}
                 onChange={(e) => setDraft({ ...draft, reference: e.target.value.trim() })}
-                className="rounded-lg border border-gray-300 px-3 py-2"
+                className="rounded-md border border-gray-300 px-3 py-2 focus:border-emerald-600 focus:ring-emerald-600"
               />
             </label>
             <label className="flex flex-col gap-1">
@@ -253,7 +253,7 @@ export const UpcomingInvoicesPage: React.FC<UpcomingInvoicesPageProps> = ({ prod
                 type="date"
                 value={draft.expected_arrival_date ?? ''}
                 onChange={(e) => setDraft({ ...draft, expected_arrival_date: e.target.value || null })}
-                className="rounded-lg border border-gray-300 px-3 py-2"
+                className="rounded-md border border-gray-300 px-3 py-2 focus:border-emerald-600 focus:ring-emerald-600"
               />
             </label>
           </div>
@@ -270,7 +270,7 @@ export const UpcomingInvoicesPage: React.FC<UpcomingInvoicesPageProps> = ({ prod
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-sm border border-gray-200 rounded-lg overflow-hidden">
+            <table className="w-full border border-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="text-left px-2 py-2">Code</th>
@@ -322,21 +322,21 @@ export const UpcomingInvoicesPage: React.FC<UpcomingInvoicesPageProps> = ({ prod
             type="button"
             onClick={handleSave}
             disabled={saving || !draft.reference || draftLines.length === 0}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-md bg-emerald-700 px-4 py-2 text-white hover:bg-emerald-800 disabled:opacity-50"
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             Save upcoming invoice
           </button>
-        </div>
+        </section>
       )}
 
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
+      <section className="rounded-md border border-gray-200 bg-white p-4 sm:p-5">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold text-gray-900">Saved upcoming invoices</h3>
           <button
             type="button"
             onClick={() => void loadInvoices()}
-            className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 hover:bg-gray-50"
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
             disabled={loadingInvoices}
           >
             Refresh
@@ -372,7 +372,7 @@ export const UpcomingInvoicesPage: React.FC<UpcomingInvoicesPageProps> = ({ prod
             </table>
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 };

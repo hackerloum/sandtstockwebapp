@@ -110,14 +110,14 @@ const downloadTextFile = (filename: string, content: string, mimeType: string) =
 };
 
 const MetricCard: React.FC<MetricCardProps> = ({ label, value, detail, icon: Icon, tone }) => (
-  <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+  <div className="min-w-0 p-4 sm:p-5">
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
         <p className="text-xs font-medium uppercase text-gray-500">{label}</p>
-        <p className="mt-2 text-2xl font-semibold text-gray-900 break-words">{value}</p>
+        <p className="mt-1 break-words text-lg font-semibold text-gray-900 sm:text-xl">{value}</p>
         <p className="mt-1 text-sm text-gray-500">{detail}</p>
       </div>
-      <div className={`shrink-0 rounded-lg border p-2 ${toneClasses[tone]}`}>
+      <div className={`shrink-0 rounded-md border p-2 ${toneClasses[tone]}`}>
         <Icon className="h-5 w-5" />
       </div>
     </div>
@@ -337,34 +337,34 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
         title="Monthly reports"
         subtitle={`${month.label} financial summary from daily closings, expenses, vendor purchases, and sales`}
         actions={
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="relative">
+        <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center">
+          <div className="relative col-span-3 sm:col-span-1">
             <CalendarDays className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
             <input
               type="month"
               value={monthValue}
               onChange={(event) => setMonthValue(event.target.value)}
-              className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500 sm:w-44"
+              className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600 sm:w-44"
             />
           </div>
           <button
             onClick={loadReport}
             disabled={loading}
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
           <button
             onClick={exportCsv}
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700"
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-800"
           >
             <Download className="h-4 w-4" />
             CSV
           </button>
           <button
             onClick={exportJson}
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
           >
             <FileJson className="h-4 w-4" />
             JSON
@@ -374,7 +374,7 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
       />
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           <div className="flex items-center gap-2">
             <AlertCircle className="h-4 w-4" />
             <span className="font-medium">{error}</span>
@@ -382,7 +382,8 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="overflow-hidden rounded-md border border-gray-200 bg-white">
+      <div className="grid grid-cols-1 divide-y divide-gray-200 sm:grid-cols-2 sm:divide-x lg:grid-cols-4">
         <MetricCard
           label="Daily closing cash"
           value={formatCurrency(analytics.dailyClosingSales)}
@@ -411,9 +412,6 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
           icon={analytics.netAfterCosts >= 0 ? TrendingUp : TrendingDown}
           tone={analytics.netAfterCosts >= 0 ? 'emerald' : 'amber'}
         />
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Vendor purchases"
           value={formatCurrency(analytics.vendorSpend)}
@@ -443,9 +441,10 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
           tone={analytics.unreconciledClosings === 0 ? 'emerald' : 'amber'}
         />
       </div>
+      </section>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 lg:col-span-2">
+        <section className="rounded-md border border-gray-200 bg-white p-4 lg:col-span-2">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-base font-semibold text-gray-900">Cash Breakdown</h3>
             <span className="text-sm text-gray-500">{month.monthStart} to {formatDate(month.end)}</span>
@@ -465,9 +464,9 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
               </div>
             ))}
           </div>
-        </div>
+        </section>
 
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+        <section className="rounded-md border border-gray-200 bg-white p-4">
           <h3 className="text-base font-semibold text-gray-900">Monthly Closing</h3>
           {analytics.latestMonthlyClosing ? (
             <div className="mt-4 space-y-3 text-sm">
@@ -495,11 +494,11 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
           ) : (
             <p className="mt-4 text-sm text-gray-500">No monthly balance closing recorded for this month.</p>
           )}
-        </div>
+        </section>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+        <div className="rounded-md border border-gray-200 bg-white p-4">
           <h3 className="text-base font-semibold text-gray-900">Expenses By Type</h3>
           <div className="mt-4 space-y-3">
             {analytics.expensesByType.length > 0 ? (
@@ -523,7 +522,7 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
           </div>
         </div>
 
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+        <div className="rounded-md border border-gray-200 bg-white p-4">
           <h3 className="text-base font-semibold text-gray-900">Sales Breakdown</h3>
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
@@ -552,7 +551,7 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
         </div>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+      <div className="rounded-md border border-gray-200 bg-white">
         <div className="border-b border-gray-200 p-4">
           <h3 className="text-base font-semibold text-gray-900">Daily Closing Detail</h3>
         </div>
@@ -594,7 +593,7 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+        <div className="rounded-md border border-gray-200 bg-white">
           <div className="border-b border-gray-200 p-4">
             <h3 className="text-base font-semibold text-gray-900">Expense Detail</h3>
           </div>
@@ -623,7 +622,7 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
           </div>
         </div>
 
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+        <div className="rounded-md border border-gray-200 bg-white">
           <div className="border-b border-gray-200 p-4">
             <h3 className="text-base font-semibold text-gray-900">Vendor Purchases</h3>
           </div>
@@ -650,7 +649,7 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+        <div className="rounded-md border border-gray-200 bg-white p-4">
           <h3 className="text-base font-semibold text-gray-900">Top Products This Month</h3>
           <div className="mt-4 space-y-3">
             {analytics.topProducts.length > 0 ? analytics.topProducts.map((product, index) => (
@@ -672,7 +671,7 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
           </div>
         </div>
 
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+        <div className="rounded-md border border-gray-200 bg-white p-4">
           <h3 className="text-base font-semibold text-gray-900">Price Override Detail</h3>
           <div className="mt-4 max-h-80 space-y-3 overflow-auto">
             {reportData.priceOverrides.length > 0 ? reportData.priceOverrides.map((override) => {

@@ -67,8 +67,11 @@ export const Modal: React.FC<ModalProps> = ({
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium text-gray-900">{title}</h3>
               <button
+                type="button"
                 onClick={onClose}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-white text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2"
+                title="Close"
+                aria-label="Close"
               >
                 <X className="h-6 w-6" />
               </button>

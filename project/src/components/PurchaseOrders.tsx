@@ -1,21 +1,39 @@
-import React, { useState } from 'react';
-import { Plus, Search, Eye, Edit2, Trash2, FileText, Package, X } from 'lucide-react';
-import { PurchaseOrder, Product, Supplier, PurchaseOrderItem } from '../types';
-import { generateId, formatCurrency, formatDate } from '../utils/stockUtils';
+import React, { useMemo, useState } from 'react';
+import { Eye, FileText, Package, Plus, Search, Trash2 } from 'lucide-react';
+import { Product, PurchaseOrder, PurchaseOrderItem, Supplier } from '../types';
+import { formatCurrency, formatDate } from '../utils/stockUtils';
 import { useAuth } from '../contexts/AuthContext';
-import { PageHeader } from './shared/PageLayout';
 import { Button } from './shared/Button';
+import { FormField, Input, Select, TextArea } from './shared/Form';
+import { EmptyState, PageHeader } from './shared/PageLayout';
 import { Modal } from './shared/Modal';
 
 interface PurchaseOrdersProps {
   purchaseOrders: PurchaseOrder[];
   products: Product[];
   suppliers: Supplier[];
-  onAddPurchaseOrder: (po: PurchaseOrder) => void;
+  onAddPurchaseOrder: (
+    po: Omit<PurchaseOrder, 'id' | 'created_at' | 'updated_at'>,
+    items: PurchaseOrderItem[]
+  ) => void | Promise<void>;
   onUpdatePurchaseOrder: (po: PurchaseOrder) => void;
   onDeletePurchaseOrder: (id: string) => void;
   onUpdateProduct: (product: Product) => void;
 }
+
+const statusStyles: Record<PurchaseOrder['status'], string> = {
+  draft: 'bg-gray-100 text-gray-700',
+  sent: 'bg-blue-50 text-blue-700',
+  confirmed: 'bg-amber-50 text-amber-700',
+  received: 'bg-emerald-50 text-emerald-700',
+  cancelled: 'bg-red-50 text-red-700'
+};
+
+const generatePONumber = () => {
+  const now = new Date();
+  const date = now.toISOString().slice(2, 10).replace(/-/g, '');
+  return `PO-${date}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+};
 
 export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
   purchaseOrders,
@@ -26,627 +44,303 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
   onDeletePurchaseOrder,
   onUpdateProduct
 }) => {
-  const { user, hasPermission } = useAuth();
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [showPOForm, setShowPOForm] = useState(false);
-  const [editingPO, setEditingPO] = useState<PurchaseOrder | null>(null);
+  const { hasPermission } = useAuth();
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('all');
+  const [formOpen, setFormOpen] = useState(false);
   const [viewingPO, setViewingPO] = useState<PurchaseOrder | null>(null);
 
-  const filteredPOs = purchaseOrders.filter(po => {
-    const matchesSearch = po.poNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         po.supplierName.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || po.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'draft': return 'bg-gray-100 text-gray-800 border-gray-200';
-      case 'sent': return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'confirmed': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'received': return 'bg-green-100 text-green-800 border-green-200';
-      case 'cancelled': return 'bg-red-100 text-red-800 border-red-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
-    }
-  };
-
-  const generatePONumber = () => {
-    const date = new Date();
-    const year = date.getFullYear().toString().slice(-2);
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    const random = Math.random().toString(36).substr(2, 4).toUpperCase();
-    return `PO${year}${month}${day}${random}`;
-  };
-
-  const handleReceivePO = (po: PurchaseOrder) => {
-    // Update product stock based on received quantities
-    po.items.forEach(item => {
-      const product = products.find(p => p.id === item.productId);
-      if (product && item.receivedQuantity) {
-        const updatedProduct = {
-          ...product,
-          currentStock: product.currentStock + item.receivedQuantity,
-          updatedAt: new Date(),
-          updatedBy: user?.username
-        };
-        onUpdateProduct(updatedProduct);
-      }
+  const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return purchaseOrders.filter((po) => {
+      const matchesSearch = !query || [po.po_number, po.supplier_name]
+        .some((value) => value?.toLowerCase().includes(query));
+      return matchesSearch && (status === 'all' || po.status === status);
     });
-
-    // Update PO status
-    const updatedPO = {
-      ...po,
-      status: 'received' as const,
-      actualDeliveryDate: new Date(),
-      updatedBy: user?.username
-    };
-    onUpdatePurchaseOrder(updatedPO);
-  };
+  }, [purchaseOrders, search, status]);
 
   if (!hasPermission('view_purchase_orders')) {
-    return (
-      <div className="text-center py-12">
-        <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-        <h3 className="text-lg font-medium text-gray-900 mb-2">Access Denied</h3>
-        <p className="text-gray-600">You don't have permission to view purchase orders.</p>
-      </div>
-    );
+    return <EmptyState icon={<Package className="h-10 w-10" />} title="Access denied" description="You do not have permission to view purchase orders." />;
   }
+
+  const receivePurchaseOrder = (po: PurchaseOrder) => {
+    (po.items || []).forEach((item) => {
+      const product = products.find((candidate) => candidate.id === item.product_id);
+      const received = item.received_quantity || item.quantity;
+      if (product && received > 0) {
+        onUpdateProduct({ ...product, current_stock: product.current_stock + received, updated_at: new Date().toISOString() });
+      }
+    });
+    const updated = {
+      ...po,
+      status: 'received' as const,
+      actual_delivery_date: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      items: (po.items || []).map((item) => ({ ...item, received_quantity: item.received_quantity || item.quantity }))
+    };
+    onUpdatePurchaseOrder(updated);
+    setViewingPO(updated);
+  };
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Purchase orders"
-        subtitle="Create, receive, and track supplier orders"
+        subtitle="Create and track stock ordered from suppliers"
         actions={hasPermission('add_purchase_order') ? (
-          <button
-            onClick={() => setShowPOForm(true)}
-            className="flex min-h-9 items-center gap-2 rounded-md bg-emerald-700 px-4 py-2 font-medium text-white transition-colors hover:bg-emerald-800"
-          >
-            <Plus className="w-4 h-4" />
-            <span>New purchase order</span>
-          </button>
+          <Button onClick={() => setFormOpen(true)} icon={<Plus className="h-4 w-4" />}>New purchase order</Button>
         ) : undefined}
       />
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {[
-          { label: 'Total POs', value: purchaseOrders.length, color: 'text-blue-600' },
-          { label: 'Draft', value: purchaseOrders.filter(po => po.status === 'draft').length, color: 'text-gray-600' },
-          { label: 'Sent', value: purchaseOrders.filter(po => po.status === 'sent').length, color: 'text-blue-600' },
-          { label: 'Received', value: purchaseOrders.filter(po => po.status === 'received').length, color: 'text-green-600' }
-        ].map((stat, index) => (
-          <div key={index} className="rounded-md border border-gray-200 bg-white p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">{stat.label}</p>
-                <p className={`mt-1 text-2xl font-semibold ${stat.color}`}>{stat.value}</p>
-              </div>
-              <FileText className="h-5 w-5 text-gray-400" />
+      <section className="overflow-hidden rounded-md border border-gray-200 bg-white">
+        <div className="grid grid-cols-2 divide-x divide-y divide-gray-200 sm:grid-cols-4 sm:divide-y-0">
+          {[
+            ['All orders', purchaseOrders.length],
+            ['Draft', purchaseOrders.filter((po) => po.status === 'draft').length],
+            ['Awaiting stock', purchaseOrders.filter((po) => ['sent', 'confirmed'].includes(po.status)).length],
+            ['Received', purchaseOrders.filter((po) => po.status === 'received').length]
+          ].map(([label, value]) => (
+            <div key={String(label)} className="p-4">
+              <p className="text-xs font-medium text-gray-500">{label}</p>
+              <p className="mt-1 text-xl font-semibold text-gray-900">{value}</p>
             </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Filters and Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <div className="flex flex-col lg:flex-row gap-4 mb-6">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input
-              type="text"
-              placeholder="Search purchase orders..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-          
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="all">All Status</option>
-            <option value="draft">Draft</option>
-            <option value="sent">Sent</option>
-            <option value="confirmed">Confirmed</option>
-            <option value="received">Received</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
+          ))}
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">PO Number</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredPOs.map((po) => (
-                <tr key={po.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">{po.poNumber}</div>
-                    <div className="text-sm text-gray-500">{po.items.length} items</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {po.supplierName}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatDate(po.orderDate)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full border ${getStatusColor(po.status)}`}>
-                      {po.status.charAt(0).toUpperCase() + po.status.slice(1)}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {formatCurrency(po.totalAmount)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <div className="flex items-center justify-end space-x-2">
-                      <button
-                        onClick={() => setViewingPO(po)}
-                        className="text-blue-600 hover:text-blue-900 p-1"
-                        title="View PO"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      {hasPermission('edit_purchase_order') && (
-                        <button
-                          onClick={() => {
-                            setEditingPO(po);
-                            setShowPOForm(true);
-                          }}
-                          className="text-indigo-600 hover:text-indigo-900 p-1"
-                          title="Edit PO"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                      )}
-                      {hasPermission('edit_purchase_order') && (
-                        <button
-                          onClick={() => {
-                            if (window.confirm('Are you sure you want to delete this purchase order?')) {
-                              onDeletePurchaseOrder(po.id);
-                            }
-                          }}
-                          className="text-red-600 hover:text-red-900 p-1"
-                          title="Delete PO"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
+        <div className="grid gap-3 border-t border-gray-200 p-4 sm:grid-cols-[1fr_12rem]">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search purchase orders" className="pl-9" />
+          </div>
+          <Select
+            value={status}
+            onChange={(event) => setStatus(event.target.value)}
+            aria-label="Purchase order status"
+            options={[
+              { value: 'all', label: 'All statuses' },
+              { value: 'draft', label: 'Draft' },
+              { value: 'sent', label: 'Sent' },
+              { value: 'confirmed', label: 'Confirmed' },
+              { value: 'received', label: 'Received' },
+              { value: 'cancelled', label: 'Cancelled' }
+            ]}
+          />
+        </div>
+
+        {filtered.length === 0 ? (
+          <EmptyState
+            icon={<FileText className="h-10 w-10" />}
+            title="No purchase orders found"
+            description={purchaseOrders.length === 0 ? 'Create the first purchase order to start tracking incoming stock.' : 'Try another search or status.'}
+            action={purchaseOrders.length === 0 && hasPermission('add_purchase_order') ? <Button onClick={() => setFormOpen(true)}>New purchase order</Button> : undefined}
+          />
+        ) : (
+          <>
+            <div className="divide-y divide-gray-200 border-t border-gray-200 md:hidden">
+              {filtered.map((po) => (
+                <button key={po.id} type="button" onClick={() => setViewingPO(po)} className="block w-full p-4 text-left hover:bg-gray-50">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-gray-900">{po.po_number}</p>
+                      <p className="mt-1 truncate text-sm text-gray-500">{po.supplier_name || 'Unknown supplier'}</p>
                     </div>
-                  </td>
-                </tr>
+                    <span className={`rounded px-2 py-1 text-xs font-medium capitalize ${statusStyles[po.status]}`}>{po.status}</span>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between text-sm">
+                    <span className="text-gray-500">{formatDate(po.order_date)}</span>
+                    <span className="font-semibold text-gray-900">{formatCurrency(po.total_amount)}</span>
+                  </div>
+                </button>
               ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+            </div>
+            <div className="hidden overflow-x-auto border-t border-gray-200 md:block">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50 text-left text-xs font-medium uppercase text-gray-500">
+                  <tr><th className="px-4 py-3">PO number</th><th className="px-4 py-3">Supplier</th><th className="px-4 py-3">Order date</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Total</th><th className="px-4 py-3 text-right">Action</th></tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {filtered.map((po) => (
+                    <tr key={po.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3"><p className="font-semibold text-gray-900">{po.po_number}</p><p className="text-xs text-gray-500">{po.items?.length || 0} items</p></td>
+                      <td className="px-4 py-3 text-gray-700">{po.supplier_name || 'Unknown supplier'}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-gray-600">{formatDate(po.order_date)}</td>
+                      <td className="px-4 py-3"><span className={`rounded px-2 py-1 text-xs font-medium capitalize ${statusStyles[po.status]}`}>{po.status}</span></td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right font-semibold text-gray-900">{formatCurrency(po.total_amount)}</td>
+                      <td className="px-4 py-3 text-right"><button type="button" onClick={() => setViewingPO(po)} className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900" title="View purchase order"><Eye className="h-4 w-4" /></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </section>
 
-      {/* PO Form Modal */}
-      {showPOForm && (
-        <PurchaseOrderForm
-          po={editingPO}
-          products={products}
-          suppliers={suppliers}
-          onSave={(po) => {
-            if (editingPO) {
-              onUpdatePurchaseOrder(po);
-            } else {
-              onAddPurchaseOrder(po);
-            }
-            setShowPOForm(false);
-            setEditingPO(null);
-          }}
-          onClose={() => {
-            setShowPOForm(false);
-            setEditingPO(null);
-          }}
-          generatePONumber={generatePONumber}
-        />
-      )}
+      <PurchaseOrderForm
+        isOpen={formOpen}
+        products={products}
+        suppliers={suppliers}
+        onClose={() => setFormOpen(false)}
+        onSave={async (po, items) => {
+          await onAddPurchaseOrder(po, items);
+          setFormOpen(false);
+        }}
+      />
 
-      {/* PO Detail Modal */}
       {viewingPO && (
         <PurchaseOrderDetail
           po={viewingPO}
           onClose={() => setViewingPO(null)}
-          onReceive={handleReceivePO}
-          onUpdateStatus={(poId, status) => {
-            const updatedPO = { ...viewingPO, status, updatedBy: user?.username };
-            onUpdatePurchaseOrder(updatedPO);
-            setViewingPO(updatedPO);
-          }}
+          onReceive={() => receivePurchaseOrder(viewingPO)}
+          onDelete={hasPermission('edit_purchase_order') ? () => {
+            if (window.confirm(`Delete ${viewingPO.po_number}?`)) {
+              onDeletePurchaseOrder(viewingPO.id);
+              setViewingPO(null);
+            }
+          } : undefined}
         />
       )}
     </div>
   );
 };
 
-// Purchase Order Form Component
-interface PurchaseOrderFormProps {
-  po: PurchaseOrder | null;
+type DraftItem = { product_id: string; quantity: number; unit_price: number };
+
+const PurchaseOrderForm: React.FC<{
+  isOpen: boolean;
   products: Product[];
   suppliers: Supplier[];
-  onSave: (po: PurchaseOrder) => void;
   onClose: () => void;
-  generatePONumber: () => string;
-}
+  onSave: (po: Omit<PurchaseOrder, 'id' | 'created_at' | 'updated_at'>, items: PurchaseOrderItem[]) => void | Promise<void>;
+}> = ({ isOpen, products, suppliers, onClose, onSave }) => {
+  const [supplierId, setSupplierId] = useState('');
+  const [expectedDate, setExpectedDate] = useState('');
+  const [notes, setNotes] = useState('');
+  const [items, setItems] = useState<DraftItem[]>([{ product_id: '', quantity: 1, unit_price: 0 }]);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
-  po,
-  products,
-  suppliers,
-  onSave,
-  onClose,
-  generatePONumber
-}) => {
-  const { user } = useAuth();
-  const [formData, setFormData] = useState({
-    supplierId: po?.supplierId || '',
-    expectedDeliveryDate: po?.expectedDeliveryDate ? new Date(po.expectedDeliveryDate).toISOString().split('T')[0] : '',
-    notes: po?.notes || ''
-  });
-  
-  const [poItems, setPOItems] = useState<PurchaseOrderItem[]>(po?.items || []);
-  const [selectedProduct, setSelectedProduct] = useState('');
-  const [quantity, setQuantity] = useState(1);
-  const [unitPrice, setUnitPrice] = useState(0);
+  const total = items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
+  const updateItem = (index: number, next: Partial<DraftItem>) => setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...next } : item));
 
-  const selectedSupplier = suppliers.find(s => s.id === formData.supplierId);
+  const reset = () => {
+    setSupplierId('');
+    setExpectedDate('');
+    setNotes('');
+    setItems([{ product_id: '', quantity: 1, unit_price: 0 }]);
+    setError(null);
+  };
 
-  const addItem = () => {
-    const product = products.find(p => p.id === selectedProduct);
-    if (!product) return;
-
-    const existingItem = poItems.find(item => item.productId === selectedProduct);
-    if (existingItem) {
-      setPOItems(prev => prev.map(item =>
-        item.productId === selectedProduct
-          ? { ...item, quantity: item.quantity + quantity, totalPrice: (item.quantity + quantity) * item.unitPrice }
-          : item
-      ));
-    } else {
-      const newItem: PurchaseOrderItem = {
-        productId: product.id,
-        productName: product.name,
-        quantity,
-        unitPrice: unitPrice || product.price,
-        totalPrice: quantity * (unitPrice || product.price)
-      };
-      setPOItems(prev => [...prev, newItem]);
+  const handleSubmit = async () => {
+    setError(null);
+    const validItems = items.filter((item) => item.product_id && item.quantity > 0);
+    if (!supplierId) return setError('Select a supplier.');
+    if (validItems.length === 0) return setError('Add at least one product.');
+    setSaving(true);
+    try {
+      const purchaseItems: PurchaseOrderItem[] = validItems.map((item) => ({
+        product_id: item.product_id,
+        product_name: products.find((product) => product.id === item.product_id)?.commercial_name || 'Unknown product',
+        quantity: item.quantity,
+        received_quantity: 0,
+        unit_price: item.unit_price,
+        total_price: item.quantity * item.unit_price
+      }));
+      await onSave({
+        po_number: generatePONumber(),
+        supplier_id: supplierId,
+        status: 'draft',
+        total_amount: total,
+        order_date: new Date().toISOString(),
+        expected_delivery_date: expectedDate || null,
+        actual_delivery_date: null,
+        notes: notes.trim() || null,
+        created_by: null
+      }, purchaseItems);
+      reset();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Could not create this purchase order.');
+    } finally {
+      setSaving(false);
     }
-    
-    setSelectedProduct('');
-    setQuantity(1);
-    setUnitPrice(0);
-  };
-
-  const removeItem = (productId: string) => {
-    setPOItems(prev => prev.filter(item => item.productId !== productId));
-  };
-
-  const totalAmount = poItems.reduce((sum, item) => sum + item.totalPrice, 0);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!formData.supplierId || poItems.length === 0) return;
-
-    const poData: PurchaseOrder = {
-      id: po?.id || generateId(),
-      poNumber: po?.poNumber || generatePONumber(),
-      supplierId: formData.supplierId,
-      supplierName: selectedSupplier?.name || '',
-      items: poItems,
-      totalAmount,
-      status: po?.status || 'draft',
-      orderDate: po?.orderDate || new Date(),
-      expectedDeliveryDate: formData.expectedDeliveryDate ? new Date(formData.expectedDeliveryDate) : undefined,
-      notes: formData.notes,
-      createdBy: po?.createdBy || user?.username,
-      updatedBy: user?.username
-    };
-
-    onSave(poData);
   };
 
   return (
     <Modal
-      isOpen
-      onClose={onClose}
-      title={po ? `Edit ${po.poNumber}` : 'New purchase order'}
+      isOpen={isOpen}
+      onClose={() => { reset(); onClose(); }}
+      title="New purchase order"
       size="xl"
-      footer={
-        <>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button type="submit" form="purchase-order-form" disabled={!formData.supplierId || poItems.length === 0}>
-            {po ? 'Update order' : 'Create order'}
-          </Button>
-        </>
-      }
+      footer={<><Button variant="outline" onClick={() => { reset(); onClose(); }}>Cancel</Button><Button onClick={handleSubmit} disabled={saving}>{saving ? 'Saving...' : 'Create purchase order'}</Button></>}
     >
-        <form id="purchase-order-form" onSubmit={handleSubmit} className="space-y-6">
-          {/* Supplier and Date */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Supplier *</label>
-              <select
-                value={formData.supplierId}
-                onChange={(e) => setFormData(prev => ({ ...prev, supplierId: e.target.value }))}
-                required
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">Select supplier</option>
-                {suppliers.map(supplier => (
-                  <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Expected Delivery Date</label>
-              <input
-                type="date"
-                value={formData.expectedDeliveryDate}
-                onChange={(e) => setFormData(prev => ({ ...prev, expectedDeliveryDate: e.target.value }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
+      <div className="space-y-5">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <FormField label="Supplier" required>
+            <Select value={supplierId} onChange={(event) => setSupplierId(event.target.value)} options={[{ value: '', label: 'Select supplier' }, ...suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))]} />
+          </FormField>
+          <FormField label="Expected delivery">
+            <Input type="date" value={expectedDate} onChange={(event) => setExpectedDate(event.target.value)} />
+          </FormField>
+        </div>
+
+        <section className="border-t border-gray-200 pt-5">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="font-semibold text-gray-900">Products</h3>
+            <Button type="button" variant="outline" size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setItems((current) => [...current, { product_id: '', quantity: 1, unit_price: 0 }])}>Add line</Button>
           </div>
-
-          {/* Add Items */}
-          <section className="border-t border-gray-200 pt-5">
-            <h3 className="mb-4 text-base font-semibold text-gray-900">Items</h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-              <select
-                value={selectedProduct}
-                onChange={(e) => {
-                  setSelectedProduct(e.target.value);
-                  const product = products.find(p => p.id === e.target.value);
-                  if (product) setUnitPrice(product.price);
-                }}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">Select product</option>
-                {products.map(product => (
-                  <option key={product.id} value={product.id}>
-                    {product.commercial_name} - {formatCurrency(product.price)}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="number"
-                value={quantity}
-                onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
-                min="1"
-                placeholder="Quantity"
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-              <input
-                type="number"
-                value={unitPrice}
-                onChange={(e) => setUnitPrice(parseFloat(e.target.value) || 0)}
-                min="0"
-                step="0.01"
-                placeholder="Unit Price"
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-              <button
-                type="button"
-                onClick={addItem}
-                disabled={!selectedProduct}
-                className="rounded-md bg-emerald-700 px-4 py-2 font-medium text-white transition-colors hover:bg-emerald-800 disabled:bg-gray-300"
-              >
-                Add
-              </button>
-            </div>
-
-            {/* Items List */}
-            {poItems.length > 0 && (
-              <div className="space-y-2">
-                {poItems.map((item) => (
-                  <div key={item.productId} className="flex flex-col gap-2 border-t border-gray-100 py-3 first:border-t-0 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
-                      <span className="font-medium">{item.productName}</span>
-                      <span className="text-gray-600 ml-2">x{item.quantity} @ {formatCurrency(item.unitPrice)}</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-3 sm:justify-end">
-                      <span className="font-medium">{formatCurrency(item.totalPrice)}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeItem(item.productId)}
-                        className="text-red-600 hover:text-red-800"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                <div className="text-right pt-2 border-t border-gray-200">
-                  <span className="text-lg font-bold">Total: {formatCurrency(totalAmount)}</span>
-                </div>
+          <div className="mt-3 space-y-3">
+            {items.map((item, index) => (
+              <div key={index} className="grid grid-cols-[1fr_5rem_7rem_2.25rem] items-end gap-2">
+                <FormField label={index === 0 ? 'Product' : ''}>
+                  <Select value={item.product_id} onChange={(event) => updateItem(index, { product_id: event.target.value })} options={[{ value: '', label: 'Select product' }, ...products.map((product) => ({ value: product.id, label: `${product.code} - ${product.commercial_name}` }))]} />
+                </FormField>
+                <FormField label={index === 0 ? 'Qty' : ''}>
+                  <Input type="number" min="1" value={item.quantity} onChange={(event) => updateItem(index, { quantity: Number(event.target.value) || 0 })} />
+                </FormField>
+                <FormField label={index === 0 ? 'Unit cost' : ''}>
+                  <Input type="number" min="0" step="0.01" value={item.unit_price} onChange={(event) => updateItem(index, { unit_price: Number(event.target.value) || 0 })} />
+                </FormField>
+                <button type="button" onClick={() => setItems((current) => current.length === 1 ? current : current.filter((_, itemIndex) => itemIndex !== index))} className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-red-50 hover:text-red-700" title="Remove line"><Trash2 className="h-4 w-4" /></button>
               </div>
-            )}
-          </section>
-
-          {/* Notes */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-            <textarea
-              value={formData.notes}
-              onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-              rows={3}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
+            ))}
           </div>
+        </section>
 
-        </form>
+        <FormField label="Notes"><TextArea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional" /></FormField>
+        {error && <p className="text-sm text-red-700" role="alert">{error}</p>}
+        <div className="flex justify-between border-t border-gray-200 pt-4 text-sm"><span className="font-medium text-gray-600">Order total</span><span className="text-lg font-semibold text-gray-900">{formatCurrency(total)}</span></div>
+      </div>
     </Modal>
   );
 };
 
-// Purchase Order Detail Component
-interface PurchaseOrderDetailProps {
+const PurchaseOrderDetail: React.FC<{
   po: PurchaseOrder;
   onClose: () => void;
-  onReceive: (po: PurchaseOrder) => void;
-  onUpdateStatus: (poId: string, status: string) => void;
-}
-
-const PurchaseOrderDetail: React.FC<PurchaseOrderDetailProps> = ({
-  po,
-  onClose,
-  onReceive,
-  onUpdateStatus
-}) => {
-  const [receivedQuantities, setReceivedQuantities] = useState<Record<string, number>>(
-    po.items.reduce((acc, item) => ({
-      ...acc,
-      [item.productId]: item.receivedQuantity || 0
-    }), {})
-  );
-
-  const handleReceive = () => {
-    const updatedPO = {
-      ...po,
-      items: po.items.map(item => ({
-        ...item,
-        receivedQuantity: receivedQuantities[item.productId] || 0
-      }))
-    };
-    onReceive(updatedPO);
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 !mt-0 flex items-end justify-center bg-gray-950/55 sm:items-center sm:p-4">
-      <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-md bg-white shadow-2xl sm:max-w-2xl sm:rounded-md">
-        <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-4 py-4 sm:px-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-gray-950">{po.poNumber}</h2>
-              <p className="text-sm text-gray-500">Purchase order details</p>
-            </div>
-            <button type="button" onClick={onClose} className="inline-flex h-9 w-9 items-center justify-center rounded-md text-xl text-gray-400 hover:bg-gray-100 hover:text-gray-600" aria-label="Close">
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
-
-        <div className="space-y-6 p-4 sm:p-6">
-          {/* PO Info */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <p className="text-xs font-medium uppercase text-gray-500">PO number</p>
-              <p className="mt-1 text-lg font-semibold text-gray-900">{po.poNumber}</p>
-            </div>
-            <div>
-              <p className="text-xs font-medium uppercase text-gray-500">Status</p>
-              <select
-                value={po.status}
-                onChange={(e) => onUpdateStatus(po.id, e.target.value)}
-                className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm font-medium capitalize focus:border-emerald-600 focus:ring-emerald-600"
-              >
-                <option value="draft">Draft</option>
-                <option value="sent">Sent</option>
-                <option value="confirmed">Confirmed</option>
-                <option value="received">Received</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Supplier Info */}
-          <section className="border-t border-gray-200 pt-5">
-            <h3 className="text-sm font-semibold text-gray-900">Supplier</h3>
-            <div className="mt-3">
-              <p className="font-medium text-gray-900">{po.supplierName}</p>
-              <p className="mt-1 text-sm text-gray-600">Ordered {formatDate(po.orderDate)}</p>
-              {po.expectedDeliveryDate && (
-                <p className="mt-1 text-sm text-gray-600">Expected {formatDate(po.expectedDeliveryDate)}</p>
-              )}
-            </div>
-          </section>
-
-          {/* PO Items */}
-          <section className="border-t border-gray-200 pt-5">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-900">Items</h3>
-              <span className="text-sm text-gray-500">{po.items.length} products</span>
-            </div>
-            <div className="divide-y divide-gray-100 rounded-md border border-gray-200">
-              {po.items.map((item) => (
-                <div key={item.productId} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-gray-900">{item.productName}</p>
-                    <p className="mt-0.5 text-xs text-gray-500">
-                      Ordered: {item.quantity} × {formatCurrency(item.unitPrice)}
-                    </p>
-                  </div>
-                  {po.status === 'confirmed' && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-600">Received</span>
-                      <input
-                        type="number"
-                        value={receivedQuantities[item.productId] || 0}
-                        onChange={(e) => setReceivedQuantities(prev => ({
-                          ...prev,
-                          [item.productId]: parseInt(e.target.value) || 0
-                        }))}
-                        max={item.quantity}
-                        min="0"
-                        className="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
-                      />
-                    </div>
-                  )}
-                  <p className="text-sm font-semibold text-gray-900">{formatCurrency(item.totalPrice)}</p>
-                </div>
-              ))}
-              <div className="flex items-end justify-between border-t border-gray-200 px-4 py-4">
-                <p className="text-sm text-gray-500">Order total</p>
-                <p className="text-xl font-semibold text-gray-950">{formatCurrency(po.totalAmount)}</p>
-              </div>
-            </div>
-          </section>
-
-          {po.notes && (
-            <section className="border-t border-gray-200 pt-5">
-              <h3 className="text-sm font-semibold text-gray-900">Notes</h3>
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-600">{po.notes}</p>
-            </section>
-          )}
-
-          <div className="flex flex-col-reverse gap-2 border-t border-gray-200 pt-4 sm:flex-row sm:justify-end">
-            <button
-              onClick={onClose}
-              className="rounded-md border border-gray-300 px-4 py-2 font-medium text-gray-700 transition-colors hover:bg-gray-50"
-            >
-              Close
-            </button>
-            {po.status === 'confirmed' && (
-              <button
-                onClick={handleReceive}
-                className="rounded-md bg-emerald-700 px-4 py-2 font-medium text-white transition-colors hover:bg-emerald-800"
-              >
-                Mark as Received
-              </button>
-            )}
-          </div>
-        </div>
+  onReceive: () => void;
+  onDelete?: () => void;
+}> = ({ po, onClose, onReceive, onDelete }) => (
+  <Modal
+    isOpen
+    onClose={onClose}
+    title={po.po_number}
+    size="lg"
+    footer={<>{onDelete && <Button variant="danger" onClick={onDelete}>Delete</Button>}<Button variant="outline" onClick={onClose}>Close</Button>{!['received', 'cancelled'].includes(po.status) && <Button onClick={onReceive}>Mark received</Button>}</>}
+  >
+    <div className="space-y-5">
+      <dl className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
+        <div><dt className="text-gray-500">Supplier</dt><dd className="mt-1 font-medium text-gray-900">{po.supplier_name || 'Unknown supplier'}</dd></div>
+        <div><dt className="text-gray-500">Order date</dt><dd className="mt-1 font-medium text-gray-900">{formatDate(po.order_date)}</dd></div>
+        <div><dt className="text-gray-500">Status</dt><dd className="mt-1"><span className={`rounded px-2 py-1 text-xs font-medium capitalize ${statusStyles[po.status]}`}>{po.status}</span></dd></div>
+        <div><dt className="text-gray-500">Total</dt><dd className="mt-1 font-semibold text-gray-900">{formatCurrency(po.total_amount)}</dd></div>
+      </dl>
+      <div className="overflow-x-auto border-y border-gray-200">
+        <table className="min-w-full divide-y divide-gray-200 text-sm">
+          <thead className="bg-gray-50 text-left text-xs font-medium uppercase text-gray-500"><tr><th className="px-3 py-2">Product</th><th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2 text-right">Unit cost</th><th className="px-3 py-2 text-right">Total</th></tr></thead>
+          <tbody className="divide-y divide-gray-200">{(po.items || []).map((item, index) => <tr key={item.id || `${item.product_id}-${index}`}><td className="px-3 py-3 font-medium text-gray-900">{item.product_name}</td><td className="px-3 py-3 text-right text-gray-700">{item.quantity}</td><td className="px-3 py-3 text-right text-gray-700">{formatCurrency(item.unit_price)}</td><td className="px-3 py-3 text-right font-medium text-gray-900">{formatCurrency(item.total_price)}</td></tr>)}</tbody>
+        </table>
       </div>
+      {po.notes && <div><h3 className="text-sm font-medium text-gray-700">Notes</h3><p className="mt-1 text-sm text-gray-600">{po.notes}</p></div>}
     </div>
-  );
-};
+  </Modal>
+);

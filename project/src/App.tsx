@@ -270,6 +270,7 @@ function AppContent() {
       setMovements(prev => [...prev, newMovement]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add movement');
+      throw err;
     }
   };
 
@@ -323,9 +324,15 @@ function AppContent() {
   const handleAddPurchaseOrder = async (po: Omit<PurchaseOrder, 'id' | 'created_at' | 'updated_at'>, items: PurchaseOrderItem[]) => {
     try {
       const newPO = await createPurchaseOrder(po, items);
-      setPurchaseOrders(prev => [...prev, newPO]);
+      const supplier = suppliers.find((candidate) => candidate.id === po.supplier_id);
+      setPurchaseOrders(prev => [{
+        ...newPO,
+        supplier_name: supplier?.name || 'Unknown Supplier',
+        items
+      }, ...prev]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create purchase order');
+      throw err;
     }
   };
 
@@ -701,6 +708,8 @@ function AppContent() {
           <EditProductPage
             product={editingProduct}
             onSave={handleSaveProduct}
+            brands={brands}
+            suppliers={suppliers}
             onBack={() => {
               setActiveTab('products');
               setEditingProduct(null);
