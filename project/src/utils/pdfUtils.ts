@@ -13,6 +13,7 @@ import {
   MAX_SUGGESTED_REORDER_UNITS,
   type ReorderEngineRow
 } from './stockUtils';
+import { getOrderDestinationLabel } from './orderUtils';
 
 /** Title and PDF metadata author/creator for all exports from this module. */
 const PDF_BRAND = 'S&T Stock';
@@ -68,7 +69,7 @@ export const generateOrderPDF = (order: Order, products: Product[]) => {
   
   doc.setFontSize(12);
   doc.setFont('helvetica', 'bold');
-  doc.text(`Type: ${getOrderTypeLabel(order.order_type)}`, margin + 80, currentY + 8);
+  doc.text(`Order for: ${getOrderDestinationLabel(order.order_type)}`, margin + 80, currentY + 8);
   doc.text(`Status: ${order.status.charAt(0).toUpperCase() + order.status.slice(1)}`, margin + 80, currentY + 18);
   
   currentY += 35;
@@ -367,22 +368,6 @@ export const generateBulkOrdersPDF = (orders: Order[], products: Product[]) => {
   doc.text(PDF_BRAND, pageWidth / 2, footerY + 8, { align: 'center' });
   
   return doc;
-};
-
-const getOrderTypeLabel = (type: string) => {
-  switch (type) {
-    case 'delivery':
-      return 'Delivery';
-    case 'storeToShop':
-    case 'store-to-shop':
-      return 'Store to Shop';
-    case 'pickup':
-      return 'Pickup';
-    case 'international-to-tanzania':
-      return 'International to Tanzania';
-    default:
-      return type || 'Unknown';
-  }
 };
 
 export type ReorderSectionPdfSlug = 'order-now' | 'plan-reorder' | 'do-not-order';

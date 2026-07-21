@@ -54,7 +54,7 @@ export interface Order {
   customer_name: string;
   customer_email: string | null;
   customer_phone: string | null;
-  order_type: string; // 'storeToShop', 'delivery', 'pickup'
+  order_type: string; // 'customer' or 'store-to-shop'; legacy values are normalized for display
   pickup_by_staff: boolean | null;
   pickup_person_name: string | null;
   pickup_person_phone: string | null;

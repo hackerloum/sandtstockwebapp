@@ -23,6 +23,7 @@ import {
   resolveOrderItemsForDisplay
 } from '../utils/stockUtils';
 import { printOrderPDFToWindow } from '../utils/pdfUtils';
+import { getOrderDestinationLabel, normalizeOrderDestination } from '../utils/orderUtils';
 
 interface OrderManagementProps {
   orders: Order[];
@@ -303,7 +304,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ order, products, onSave, onSaved,
   const [customerName, setCustomerName] = useState(order?.customer_name || 'Walk-in customer');
   const [customerPhone, setCustomerPhone] = useState(order?.customer_phone || '');
   const [customerEmail, setCustomerEmail] = useState(order?.customer_email || '');
-  const [orderType, setOrderType] = useState(order?.order_type || 'store-to-shop');
+  const [orderType, setOrderType] = useState(normalizeOrderDestination(order?.order_type));
   const [notes, setNotes] = useState(order?.notes || '');
   const [orderItems, setOrderItems] = useState<OrderItem[]>(initialItems);
   const [productQuery, setProductQuery] = useState('');
@@ -513,12 +514,32 @@ const OrderForm: React.FC<OrderFormProps> = ({ order, products, onSave, onSaved,
             )}
 
             <div className="mt-5 space-y-3 border-t border-gray-200 pt-5">
+              <fieldset>
+                <legend className="mb-1.5 text-sm font-medium text-gray-700">Order for</legend>
+                <div className="grid grid-cols-2 rounded-md border border-gray-300 bg-white p-1">
+                  {(['customer', 'store-to-shop'] as const).map((destination) => (
+                    <button
+                      key={destination}
+                      type="button"
+                      onClick={() => setOrderType(destination)}
+                      className={`h-10 rounded text-sm font-semibold transition-colors ${
+                        orderType === destination
+                          ? 'bg-gray-950 text-white'
+                          : 'text-gray-600 hover:bg-gray-100 hover:text-gray-950'
+                      }`}
+                      aria-pressed={orderType === destination}
+                    >
+                      {getOrderDestinationLabel(destination)}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
               <div>
                 <label className="mb-1.5 flex items-center gap-2 text-sm font-medium text-gray-700">
                   <UserRound className="h-4 w-4 text-gray-400" />
-                  Customer
+                  {orderType === 'store-to-shop' ? 'Shop name' : 'Customer'}
                 </label>
-                <input value={customerName} onChange={(event) => setCustomerName(event.target.value)} className="h-11 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
+                <input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder={orderType === 'store-to-shop' ? 'Shop name' : 'Customer name'} className="h-11 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
               </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700">Phone <span className="font-normal text-gray-400">optional</span></label>
@@ -530,13 +551,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ order, products, onSave, onSaved,
               </button>
               {showMore && (
                 <div className="space-y-3">
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Order type</label>
-                    <select value={orderType} onChange={(event) => setOrderType(event.target.value)} className="h-11 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100">
-                      <option value="store-to-shop">Local sale</option>
-                      <option value="international-to-tanzania">International delivery</option>
-                    </select>
-                  </div>
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-gray-700">Email</label>
                     <input type="email" value={customerEmail} onChange={(event) => setCustomerEmail(event.target.value)} className="h-11 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
@@ -603,9 +617,13 @@ const OrderDetailModal: React.FC<OrderDetailModalProps> = ({ order, products, on
         </header>
 
         <div className="space-y-6 p-4 sm:p-6">
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-md bg-gray-50 p-4">
-              <p className="text-xs font-medium uppercase text-gray-500">Customer</p>
+              <p className="text-xs font-medium uppercase text-gray-500">Order for</p>
+              <p className="mt-1 font-semibold text-gray-950">{getOrderDestinationLabel(order.order_type)}</p>
+            </div>
+            <div className="rounded-md bg-gray-50 p-4">
+              <p className="text-xs font-medium uppercase text-gray-500">{normalizeOrderDestination(order.order_type) === 'store-to-shop' ? 'Shop' : 'Customer'}</p>
               <p className="mt-1 font-semibold text-gray-950">{order.customer_name || 'Walk-in customer'}</p>
               {order.customer_phone && <p className="mt-1 text-sm text-gray-600">{order.customer_phone}</p>}
             </div>

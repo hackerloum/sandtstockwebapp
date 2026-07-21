@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import type { DailyClosing, MonthlyReportData, Order, Product } from '../types';
 import { formatCurrency, formatDate, resolveOrderItemsForDisplay, toMoneyNumber } from '../utils/stockUtils';
+import { getOrderDestinationLabel, normalizeOrderDestination } from '../utils/orderUtils';
 import { getLatestMonthlyReportMonth, getMonthlyReportData } from '../lib/supabase';
 import { PageHeader } from './shared/PageLayout';
 
@@ -216,7 +217,7 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
 
     const orderTypeStats = Object.entries(
       monthlyOrders.reduce<Record<string, { count: number; total: number }>>((acc, order) => {
-        const key = order.order_type || 'standard';
+        const key = normalizeOrderDestination(order.order_type);
         if (!acc[key]) acc[key] = { count: 0, total: 0 };
         acc[key].count += 1;
         acc[key].total += toMoneyNumber(order.total_amount, 0);
@@ -530,7 +531,7 @@ export const MonthlyReportsPage: React.FC<MonthlyReportsPageProps> = ({ orders, 
               <div className="mt-2 space-y-2">
                 {analytics.orderTypeStats.length > 0 ? analytics.orderTypeStats.map((row) => (
                   <div key={row.type} className="flex justify-between gap-3 text-sm">
-                    <span className="capitalize text-gray-600">{row.type.replace(/-/g, ' ')}</span>
+                    <span className="text-gray-600">{getOrderDestinationLabel(row.type)}</span>
                     <span className="font-medium text-gray-900">{formatCurrency(row.total)}</span>
                   </div>
                 )) : <p className="text-sm text-gray-500">No orders.</p>}
