@@ -304,15 +304,29 @@ const OrderForm: React.FC<OrderFormProps> = ({ order, products, onSave, onClose 
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const productResults = useMemo(() => {
-    const query = productQuery.trim().toLowerCase();
+    const normalizeSearchValue = (value: unknown) => String(value ?? '')
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLowerCase();
+    const queryTerms = normalizeSearchValue(productQuery).split(/\s+/).filter(Boolean);
+
     return products
       .filter((product) => product.current_stock > 0)
-      .filter((product) => !query
-        || product.commercial_name.toLowerCase().includes(query)
-        || product.code.toLowerCase().includes(query)
-        || product.item_number.toLowerCase().includes(query))
-      .sort((a, b) => a.commercial_name.localeCompare(b.commercial_name))
-      .slice(0, 8);
+      .filter((product) => {
+        const searchableText = [
+          product.commercial_name,
+          product.code,
+          product.item_number,
+          product.category,
+          product.product_type
+        ].map(normalizeSearchValue).join(' ');
+
+        return queryTerms.length === 0
+          || queryTerms.every((term) => searchableText.includes(term));
+      })
+      .sort((a, b) => normalizeSearchValue(a.commercial_name)
+        .localeCompare(normalizeSearchValue(b.commercial_name)));
   }, [productQuery, products]);
 
   const totalAmount = orderItems.reduce((sum, item) => sum + item.total_price, 0);
