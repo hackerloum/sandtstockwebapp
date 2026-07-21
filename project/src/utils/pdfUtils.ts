@@ -132,7 +132,7 @@ export const generateOrderPDF = (order: Order, products: Product[]) => {
     });
     
     // Get the final Y position after the table
-    currentY = (doc as any).lastAutoTable.finalY + 10;
+    currentY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
   }
   
   // Add total amount section
@@ -234,27 +234,31 @@ export const printOrderPDF = (order: Order, products: Product[]) => {
   }
 };
 
-export const printOrderPDFToWindow = (order: Order, products: Product[]) => {
+export const printOrderPDFToWindow = (
+  order: Order,
+  products: Product[],
+  reservedWindow: Window | null = null
+) => {
   try {
     const doc = generateOrderPDF(order, products);
-    
-    // Open PDF in new window for printing
     const pdfBlob = doc.output('blob');
     const pdfUrl = URL.createObjectURL(pdfBlob);
-    
-    const printWindow = window.open(pdfUrl);
-    if (printWindow) {
-      printWindow.onload = () => {
-        printWindow.print();
-      };
+    const printWindow = reservedWindow && !reservedWindow.closed
+      ? reservedWindow
+      : window.open('', '_blank');
+
+    if (printWindow && !printWindow.closed) {
+      printWindow.location.replace(pdfUrl);
+      printWindow.focus();
+      window.setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
     } else {
-      // Fallback: download the PDF
+      URL.revokeObjectURL(pdfUrl);
       doc.save(`Order_${order.order_number}_print.pdf`);
     }
-    
-    console.log('PDF opened for printing');
+
     return true;
   } catch (error) {
+    reservedWindow?.close();
     console.error('Error generating PDF for printing:', error);
     alert('Error generating PDF for printing. Please try again.');
     return false;

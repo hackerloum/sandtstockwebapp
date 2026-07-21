@@ -281,13 +281,28 @@ function AppContent() {
   const handleAddOrder = async (order: Order) => {
     try {
       const items = order.items || [];
-      const orderWithoutItems = { ...order };
-      delete orderWithoutItems.items;
-      
-      const newOrder = await createOrder(orderWithoutItems, items);
-      setOrders(prev => [...prev, { ...newOrder, items }]);
+      const orderInsert = {
+        order_number: order.order_number,
+        customer_name: order.customer_name,
+        customer_email: order.customer_email,
+        customer_phone: order.customer_phone,
+        order_type: order.order_type,
+        pickup_by_staff: order.pickup_by_staff,
+        pickup_person_name: order.pickup_person_name,
+        pickup_person_phone: order.pickup_person_phone,
+        status: order.status,
+        total_amount: order.total_amount,
+        notes: order.notes,
+        created_by: order.created_by
+      };
+
+      const newOrder = await createOrder(orderInsert, items);
+      const savedOrder = { ...newOrder, items } as Order;
+      setOrders(prev => [...prev, savedOrder]);
+      return savedOrder;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create order');
+      throw err;
     }
   };
 

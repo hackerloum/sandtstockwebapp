@@ -7,6 +7,7 @@ import {
   Minus,
   Package,
   Plus,
+  Printer,
   Search,
   ShoppingCart,
   Trash2,
@@ -21,13 +22,14 @@ import {
   resolveOrderGrandTotal,
   resolveOrderItemsForDisplay
 } from '../utils/stockUtils';
+import { printOrderPDFToWindow } from '../utils/pdfUtils';
 
 interface OrderManagementProps {
   orders: Order[];
   products: Product[];
   openNewOrderSignal?: number;
   onNewOrderOpened?: () => void;
-  onAddOrder: (order: Order) => void | Promise<void>;
+  onAddOrder: (order: Order) => Order | void | Promise<Order | void>;
   onUpdateOrder: (order: Order) => void | Promise<void>;
   onDeleteOrder: (id: string) => void;
   onUpdateProduct: (product: Product) => void;
@@ -242,8 +244,13 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({
           order={editingOrder}
           products={products}
           onSave={async (order) => {
-            if (editingOrder) await onUpdateOrder(order);
-            else await onAddOrder(order);
+            if (editingOrder) {
+              await onUpdateOrder(order);
+              return order;
+            }
+            return await onAddOrder(order);
+          }}
+          onSaved={() => {
             setShowOrderForm(false);
             setEditingOrder(null);
           }}
@@ -273,11 +280,12 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({
 interface OrderFormProps {
   order: Order | null;
   products: Product[];
-  onSave: (order: Order) => void | Promise<void>;
+  onSave: (order: Order) => Order | void | Promise<Order | void>;
+  onSaved: () => void;
   onClose: () => void;
 }
 
-const OrderForm: React.FC<OrderFormProps> = ({ order, products, onSave, onClose }) => {
+const OrderForm: React.FC<OrderFormProps> = ({ order, products, onSave, onSaved, onClose }) => {
   const initialItems = useMemo<OrderItem[]>(() => {
     if (!order) return [];
     return resolveOrderItemsForDisplay(
@@ -362,8 +370,18 @@ const OrderForm: React.FC<OrderFormProps> = ({ order, products, onSave, onClose 
     if (orderItems.length === 0 || isSaving) return;
     setSaveError(null);
     setIsSaving(true);
+    const printWindow = order ? null : window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.title = 'Preparing order PDF';
+      const status = printWindow.document.createElement('p');
+      status.textContent = 'Preparing printable order...';
+      status.style.fontFamily = 'Arial, sans-serif';
+      status.style.margin = '40px';
+      status.style.color = '#374151';
+      printWindow.document.body.appendChild(status);
+    }
     try {
-      await onSave({
+      const submittedOrder: Order = {
         id: order?.id || Date.now().toString(),
         order_number: order?.order_number || generateOrderNumber(),
         customer_name: customerName.trim() || 'Walk-in customer',
@@ -380,8 +398,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ order, products, onSave, onClose 
         created_by: order?.created_by || null,
         created_at: order?.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString()
-      });
+      };
+      const savedOrder = await onSave(submittedOrder);
+      if (!order) {
+        printOrderPDFToWindow(savedOrder || submittedOrder, products, printWindow);
+      }
+      onSaved();
     } catch (error) {
+      printWindow?.close();
       setSaveError(error instanceof Error ? error.message : 'Could not save this sale');
     } finally {
       setIsSaving(false);
@@ -567,9 +591,15 @@ const OrderDetailModal: React.FC<OrderDetailModalProps> = ({ order, products, on
             <h2 className="text-lg font-semibold text-gray-950">{order.order_number}</h2>
             <p className="text-sm text-gray-500">{formatDate(order.created_at)}</p>
           </div>
-          <button type="button" onClick={onClose} className="flex h-10 w-10 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100" title="Close">
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={() => printOrderPDFToWindow(order, products)} className="flex h-10 items-center gap-2 rounded-md px-3 text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900" title="Print order PDF">
+              <Printer className="h-4 w-4" />
+              <span className="hidden sm:inline">Print</span>
+            </button>
+            <button type="button" onClick={onClose} className="flex h-10 w-10 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100" title="Close" aria-label="Close">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </header>
 
         <div className="space-y-6 p-4 sm:p-6">
