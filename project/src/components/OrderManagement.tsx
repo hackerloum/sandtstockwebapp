@@ -1,10 +1,23 @@
-import React, { useState } from 'react';
-import { Plus, Search, Eye, Edit2, Trash2, ShoppingCart } from 'lucide-react';
-import { Order, Product, OrderItem } from '../types';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  generateOrderNumber,
+  Check,
+  ChevronDown,
+  Edit2,
+  Eye,
+  Minus,
+  Package,
+  Plus,
+  Search,
+  ShoppingCart,
+  Trash2,
+  UserRound,
+  X
+} from 'lucide-react';
+import { Order, OrderItem, Product } from '../types';
+import {
   formatCurrency,
   formatDate,
+  generateOrderNumber,
   resolveOrderGrandTotal,
   resolveOrderItemsForDisplay
 } from '../utils/stockUtils';
@@ -12,97 +25,123 @@ import {
 interface OrderManagementProps {
   orders: Order[];
   products: Product[];
-  onAddOrder: (order: Order) => void;
-  onUpdateOrder: (order: Order) => void;
+  openNewOrderSignal?: number;
+  onNewOrderOpened?: () => void;
+  onAddOrder: (order: Order) => void | Promise<void>;
+  onUpdateOrder: (order: Order) => void | Promise<void>;
   onDeleteOrder: (id: string) => void;
   onUpdateProduct: (product: Product) => void;
 }
 
+const isToday = (value: string) => {
+  const date = new Date(value);
+  const today = new Date();
+  return date.getFullYear() === today.getFullYear()
+    && date.getMonth() === today.getMonth()
+    && date.getDate() === today.getDate();
+};
+
+const statusStyles: Record<Order['status'], string> = {
+  pending: 'bg-amber-50 text-amber-700 ring-amber-200',
+  processing: 'bg-blue-50 text-blue-700 ring-blue-200',
+  shipped: 'bg-violet-50 text-violet-700 ring-violet-200',
+  delivered: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  cancelled: 'bg-red-50 text-red-700 ring-red-200'
+};
+
 export const OrderManagement: React.FC<OrderManagementProps> = ({
   orders,
   products,
+  openNewOrderSignal = 0,
+  onNewOrderOpened,
   onAddOrder,
   onUpdateOrder,
-  onDeleteOrder,
-  onUpdateProduct
+  onDeleteOrder
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
 
-  const filteredOrders = orders.filter(order => {
-    const matchesSearch = (order.order_number || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         (order.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'pending': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'processing': return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'shipped': return 'bg-purple-100 text-purple-800 border-purple-200';
-      case 'delivered': return 'bg-green-100 text-green-800 border-green-200';
-      case 'cancelled': return 'bg-red-100 text-red-800 border-red-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
+  useEffect(() => {
+    if (openNewOrderSignal > 0) {
+      setEditingOrder(null);
+      setShowOrderForm(true);
+      onNewOrderOpened?.();
     }
-  };
+  }, [onNewOrderOpened, openNewOrderSignal]);
+
+  const filteredOrders = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+    return [...orders]
+      .filter((order) => {
+        const matchesSearch = !normalizedSearch
+          || order.order_number.toLowerCase().includes(normalizedSearch)
+          || (order.customer_name || '').toLowerCase().includes(normalizedSearch)
+          || (order.customer_phone || '').toLowerCase().includes(normalizedSearch);
+        const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
+        return matchesSearch && matchesStatus;
+      })
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }, [orders, searchTerm, statusFilter]);
+
+  const todayOrders = orders.filter((order) => order.status !== 'cancelled' && isToday(order.created_at));
+  const todayRevenue = todayOrders.reduce((sum, order) => sum + resolveOrderGrandTotal(order), 0);
+  const stats = [
+    { label: 'Sales today', value: formatCurrency(todayRevenue) },
+    { label: 'Orders today', value: todayOrders.length.toLocaleString() },
+    { label: 'Pending', value: orders.filter((order) => order.status === 'pending').length.toLocaleString() },
+    { label: 'Completed', value: orders.filter((order) => order.status === 'delivered').length.toLocaleString() }
+  ];
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-900">Order Management</h2>
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-sm font-medium text-gray-500">Customer orders</p>
+          <h1 className="mt-1 text-2xl font-semibold text-gray-950 sm:text-3xl">Sales</h1>
+        </div>
         <button
-          onClick={() => setShowOrderForm(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors"
+          type="button"
+          onClick={() => {
+            setEditingOrder(null);
+            setShowOrderForm(true);
+          }}
+          className="flex h-12 w-full items-center justify-center gap-2 rounded-md bg-emerald-600 px-5 text-sm font-semibold text-white hover:bg-emerald-700 sm:w-auto"
         >
-          <Plus className="w-4 h-4" />
-          <span>New Order</span>
+          <Plus className="h-5 w-5" />
+          New sale
         </button>
-      </div>
+      </header>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        {[
-          { label: 'Total Orders', value: orders.length, color: 'text-blue-600' },
-          { label: 'Pending', value: orders.filter(o => o.status === 'pending').length, color: 'text-yellow-600' },
-          { label: 'Processing', value: orders.filter(o => o.status === 'processing').length, color: 'text-blue-600' },
-          { label: 'Delivered', value: orders.filter(o => o.status === 'delivered').length, color: 'text-green-600' }
-        ].map((stat, index) => (
-          <div key={index} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">{stat.label}</p>
-                <p className={`text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
-              </div>
-              <ShoppingCart className="w-8 h-8 text-gray-400" />
-            </div>
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {stats.map((stat) => (
+          <div key={stat.label} className="min-w-0 rounded-md border border-gray-200 bg-white p-4">
+            <p className="truncate text-xs font-medium text-gray-500 sm:text-sm">{stat.label}</p>
+            <p className="mt-1 break-words text-lg font-semibold text-gray-950 sm:text-2xl">{stat.value}</p>
           </div>
         ))}
-      </div>
+      </section>
 
-      {/* Filters */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <div className="flex flex-col lg:flex-row gap-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+      <section className="overflow-hidden rounded-md border border-gray-200 bg-white">
+        <div className="flex flex-col gap-3 border-b border-gray-200 p-4 sm:flex-row sm:items-center">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <input
-              type="text"
-              placeholder="Search orders..."
+              type="search"
+              placeholder="Search order, customer, or phone"
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              onChange={(event) => setSearchTerm(event.target.value)}
+              className="h-11 w-full rounded-md border border-gray-300 bg-white pl-10 pr-3 text-sm text-gray-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
             />
           </div>
-          
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            onChange={(event) => setStatusFilter(event.target.value)}
+            className="h-11 rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 sm:w-44"
           >
-            <option value="all">All Status</option>
+            <option value="all">All statuses</option>
             <option value="pending">Pending</option>
             <option value="processing">Processing</option>
             <option value="shipped">Shipped</option>
@@ -111,103 +150,100 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({
           </select>
         </div>
 
-        {/* Orders Table */}
-        <div className="mt-6 overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Order</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredOrders.map((order) => (
-                <tr key={order.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">{order.order_number}</div>
-                    <div className="text-sm text-gray-500">{order.items?.length || 0} items</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">{order.customer_name}</div>
-                    <div className="text-sm text-gray-500">{order.customer_email}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatDate(order.created_at)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full border ${getStatusColor(order.status)}`}>
-                      {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {formatCurrency(order.total_amount)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <div className="flex items-center justify-end space-x-2">
-                      <button
-                        onClick={() => setViewingOrder(order)}
-                        className="text-blue-600 hover:text-blue-900 p-1"
-                        title="View Order"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditingOrder(order);
-                          setShowOrderForm(true);
-                        }}
-                        className="text-indigo-600 hover:text-indigo-900 p-1"
-                        title="Edit Order"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (window.confirm('Are you sure you want to delete this order?')) {
-                            onDeleteOrder(order.id);
-                          }
-                        }}
-                        className="text-red-600 hover:text-red-900 p-1"
-                        title="Delete Order"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+        {filteredOrders.length === 0 ? (
+          <div className="flex flex-col items-center px-4 py-16 text-center">
+            <ShoppingCart className="h-9 w-9 text-gray-300" />
+            <p className="mt-3 font-medium text-gray-900">No sales found</p>
+            <p className="mt-1 text-sm text-gray-500">Try another search or create a new sale.</p>
+          </div>
+        ) : (
+          <>
+            <div className="hidden overflow-x-auto lg:block">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    {['Order', 'Customer', 'Date', 'Status', 'Total', 'Actions'].map((heading) => (
+                      <th key={heading} className={`${heading === 'Actions' ? 'text-right' : 'text-left'} px-5 py-3 text-xs font-semibold uppercase text-gray-500`}>
+                        {heading}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 bg-white">
+                  {filteredOrders.map((order) => (
+                    <tr key={order.id} className="hover:bg-gray-50">
+                      <td className="whitespace-nowrap px-5 py-4">
+                        <p className="text-sm font-semibold text-gray-900">{order.order_number}</p>
+                        <p className="text-xs text-gray-500">{order.items?.length || 0} items</p>
+                      </td>
+                      <td className="max-w-56 px-5 py-4">
+                        <p className="truncate text-sm font-medium text-gray-900">{order.customer_name || 'Walk-in customer'}</p>
+                        <p className="truncate text-xs text-gray-500">{order.customer_phone || 'No phone'}</p>
+                      </td>
+                      <td className="whitespace-nowrap px-5 py-4 text-sm text-gray-600">{formatDate(order.created_at)}</td>
+                      <td className="whitespace-nowrap px-5 py-4">
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold capitalize ring-1 ring-inset ${statusStyles[order.status]}`}>
+                          {order.status}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-5 py-4 text-sm font-semibold text-gray-950">{formatCurrency(resolveOrderGrandTotal(order))}</td>
+                      <td className="whitespace-nowrap px-5 py-4">
+                        <div className="flex items-center justify-end gap-1">
+                          <button type="button" onClick={() => setViewingOrder(order)} className="flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900" title="View sale">
+                            <Eye className="h-4 w-4" />
+                          </button>
+                          <button type="button" onClick={() => { setEditingOrder(order); setShowOrderForm(true); }} className="flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900" title="Edit sale">
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm(`Delete order ${order.order_number}?`)) onDeleteOrder(order.id);
+                            }}
+                            className="flex h-9 w-9 items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-700"
+                            title="Delete sale"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-      {/* Order Form Modal */}
+            <div className="divide-y divide-gray-100 lg:hidden">
+              {filteredOrders.map((order) => (
+                <button
+                  key={order.id}
+                  type="button"
+                  onClick={() => setViewingOrder(order)}
+                  className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-4 text-left hover:bg-gray-50"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="font-semibold text-gray-900">{order.order_number}</p>
+                      <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ring-1 ring-inset ${statusStyles[order.status]}`}>{order.status}</span>
+                    </div>
+                    <p className="mt-1 truncate text-sm text-gray-600">{order.customer_name || 'Walk-in customer'}</p>
+                    <p className="mt-0.5 text-xs text-gray-500">{formatDate(order.created_at)} · {order.items?.length || 0} items</p>
+                  </div>
+                  <p className="text-sm font-semibold text-gray-950">{formatCurrency(resolveOrderGrandTotal(order))}</p>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
+
       {showOrderForm && (
         <OrderForm
           order={editingOrder}
           products={products}
-          onSave={(order) => {
-            if (editingOrder) {
-              onUpdateOrder(order);
-            } else {
-              onAddOrder(order);
-              // Update product stock
-              order.items.forEach(item => {
-                const product = products.find(p => p.id === item.productId);
-                if (product) {
-                  const updatedProduct = {
-                    ...product,
-                    currentStock: Math.max(0, product.currentStock - item.quantity),
-                    updatedAt: new Date()
-                  };
-                  onUpdateProduct(updatedProduct);
-                }
-              });
-            }
+          onSave={async (order) => {
+            if (editingOrder) await onUpdateOrder(order);
+            else await onAddOrder(order);
             setShowOrderForm(false);
             setEditingOrder(null);
           }}
@@ -218,15 +254,14 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({
         />
       )}
 
-      {/* Order Detail Modal */}
       {viewingOrder && (
         <OrderDetailModal
           order={viewingOrder}
           products={products}
           onClose={() => setViewingOrder(null)}
-          onUpdateStatus={(orderId, status) => {
+          onUpdateStatus={async (status) => {
             const updatedOrder = { ...viewingOrder, status };
-            onUpdateOrder(updatedOrder);
+            await onUpdateOrder(updatedOrder);
             setViewingOrder(updatedOrder);
           }}
         />
@@ -235,317 +270,342 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({
   );
 };
 
-// Order Form Component
 interface OrderFormProps {
   order: Order | null;
   products: Product[];
-  onSave: (order: Order) => void;
+  onSave: (order: Order) => void | Promise<void>;
   onClose: () => void;
 }
 
 const OrderForm: React.FC<OrderFormProps> = ({ order, products, onSave, onClose }) => {
-  const [formData, setFormData] = useState({
-    customerName: order?.customer_name || '',
-    customerEmail: order?.customer_email || '',
-    customerPhone: order?.customer_phone || '',
-    orderType: order?.order_type || 'store-to-shop',
-    notes: order?.notes || ''
-  });
-  
-  const [orderItems, setOrderItems] = useState<OrderItem[]>(order?.items || []);
-  const [selectedProduct, setSelectedProduct] = useState('');
-  const [quantity, setQuantity] = useState(1);
+  const initialItems = useMemo<OrderItem[]>(() => {
+    if (!order) return [];
+    return resolveOrderItemsForDisplay(
+      order,
+      products as Parameters<typeof resolveOrderItemsForDisplay>[1]
+    ).map((item) => ({
+      product_id: item.product_id,
+      product_name: item.product_name,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+      total_price: item.total_price
+    }));
+  }, [order, products]);
 
-  const addItem = () => {
-    const product = products.find(p => p.id === selectedProduct);
-    if (!product) return;
+  const [customerName, setCustomerName] = useState(order?.customer_name || 'Walk-in customer');
+  const [customerPhone, setCustomerPhone] = useState(order?.customer_phone || '');
+  const [customerEmail, setCustomerEmail] = useState(order?.customer_email || '');
+  const [orderType, setOrderType] = useState(order?.order_type || 'store-to-shop');
+  const [notes, setNotes] = useState(order?.notes || '');
+  const [orderItems, setOrderItems] = useState<OrderItem[]>(initialItems);
+  const [productQuery, setProductQuery] = useState('');
+  const [showMore, setShowMore] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-    const existingItem = orderItems.find(item => item.product_id === selectedProduct);
-    if (existingItem) {
-      setOrderItems(prev => prev.map(item =>
-        item.product_id === selectedProduct
-          ? { ...item, quantity: item.quantity + quantity, total_price: (item.quantity + quantity) * item.unit_price }
-          : item
-      ));
-    } else {
-      const newItem: OrderItem = {
-        product_id: product.id,
-        product_name: product.commercial_name,
-        quantity,
-        unit_price: product.price,
-        total_price: quantity * product.price
-      };
-      setOrderItems(prev => [...prev, newItem]);
-    }
-    
-    setSelectedProduct('');
-    setQuantity(1);
-  };
-
-  const removeItem = (productId: string) => {
-    setOrderItems(prev => prev.filter(item => item.product_id !== productId));
-  };
+  const productResults = useMemo(() => {
+    const query = productQuery.trim().toLowerCase();
+    return products
+      .filter((product) => product.current_stock > 0)
+      .filter((product) => !query
+        || product.commercial_name.toLowerCase().includes(query)
+        || product.code.toLowerCase().includes(query)
+        || product.item_number.toLowerCase().includes(query))
+      .sort((a, b) => a.commercial_name.localeCompare(b.commercial_name))
+      .slice(0, 8);
+  }, [productQuery, products]);
 
   const totalAmount = orderItems.reduce((sum, item) => sum + item.total_price, 0);
+  const totalUnits = orderItems.reduce((sum, item) => sum + item.quantity, 0);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!formData.customerName || orderItems.length === 0) return;
+  const addProduct = (product: Product) => {
+    setOrderItems((current) => {
+      const existing = current.find((item) => item.product_id === product.id);
+      if (existing) {
+        return current.map((item) => item.product_id === product.id
+          ? { ...item, quantity: item.quantity + 1, total_price: (item.quantity + 1) * item.unit_price }
+          : item);
+      }
+      return [...current, {
+        product_id: product.id,
+        product_name: product.commercial_name,
+        quantity: 1,
+        unit_price: product.price,
+        total_price: product.price
+      }];
+    });
+  };
 
-    const orderData: Order = {
-      id: order?.id || Date.now().toString(),
-      order_number: order?.order_number || generateOrderNumber(),
-      customer_name: formData.customerName,
-      customer_email: formData.customerEmail,
-      customer_phone: formData.customerPhone,
-      order_type: formData.orderType as 'store-to-shop' | 'international-to-tanzania',
-      items: orderItems,
-      total_amount: totalAmount,
-      status: order?.status || 'pending',
-      notes: formData.notes,
-      created_by: null,
-      created_at: order?.created_at || new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
+  const updateQuantity = (productId: string, nextQuantity: number) => {
+    if (nextQuantity < 1) return;
+    setOrderItems((current) => current.map((item) => item.product_id === productId
+      ? { ...item, quantity: nextQuantity, total_price: nextQuantity * item.unit_price }
+      : item));
+  };
 
-    onSave(orderData);
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (orderItems.length === 0 || isSaving) return;
+    setSaveError(null);
+    setIsSaving(true);
+    try {
+      await onSave({
+        id: order?.id || Date.now().toString(),
+        order_number: order?.order_number || generateOrderNumber(),
+        customer_name: customerName.trim() || 'Walk-in customer',
+        customer_email: customerEmail.trim() || null,
+        customer_phone: customerPhone.trim() || null,
+        order_type: orderType,
+        pickup_by_staff: order?.pickup_by_staff ?? null,
+        pickup_person_name: order?.pickup_person_name ?? null,
+        pickup_person_phone: order?.pickup_person_phone ?? null,
+        items: orderItems,
+        total_amount: totalAmount,
+        status: order?.status || 'pending',
+        notes: notes.trim() || null,
+        created_by: order?.created_by || null,
+        created_at: order?.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Could not save this sale');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900">
-            {order ? 'Edit Order' : 'Create New Order'}
-          </h2>
-        </div>
-
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {/* Order Type */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Order Type *</label>
-            <select
-              value={formData.orderType}
-              onChange={(e) => setFormData(prev => ({ ...prev, orderType: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              required
-            >
-              <option value="store-to-shop">Store to Shop (Local)</option>
-              <option value="international-to-tanzania">International to Tanzania</option>
-            </select>
+    <div className="fixed inset-0 z-50 !mt-0 bg-gray-950/55 lg:p-5">
+      <form onSubmit={handleSubmit} className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden bg-white lg:rounded-md lg:shadow-2xl">
+        <header className="flex h-16 shrink-0 items-center justify-between border-b border-gray-200 px-4 sm:px-6">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-950">{order ? 'Edit sale' : 'New sale'}</h2>
+            <p className="text-xs text-gray-500">{totalUnits} units · {formatCurrency(totalAmount)}</p>
           </div>
+          <button type="button" onClick={onClose} disabled={isSaving} className="flex h-10 w-10 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100" title="Close">
+            <X className="h-5 w-5" />
+          </button>
+        </header>
 
-          {/* Customer Information */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Customer Name *</label>
-              <input
-                type="text"
-                value={formData.customerName}
-                onChange={(e) => setFormData(prev => ({ ...prev, customerName: e.target.value }))}
-                required
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-              <input
-                type="email"
-                value={formData.customerEmail}
-                onChange={(e) => setFormData(prev => ({ ...prev, customerEmail: e.target.value }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-              <input
-                type="tel"
-                value={formData.customerPhone}
-                onChange={(e) => setFormData(prev => ({ ...prev, customerPhone: e.target.value }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-          </div>
-
-          {/* Add Items */}
-          <div className="border border-gray-200 rounded-lg p-4">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Order Items</h3>
-            
-            <div className="flex gap-4 mb-4">
-              <select
-                value={selectedProduct}
-                onChange={(e) => setSelectedProduct(e.target.value)}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">Select a product</option>
-                {products.filter(p => p.current_stock > 0).map(product => (
-                  <option key={product.id} value={product.id}>
-                    {product.commercial_name} - {formatCurrency(product.price)} (Stock: {product.current_stock})
-                  </option>
-                ))}
-              </select>
-              <input
-                type="number"
-                value={quantity}
-                onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
-                min="1"
-                className="w-24 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-              <button
-                type="button"
-                onClick={addItem}
-                disabled={!selectedProduct}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-lg transition-colors"
-              >
-                Add
-              </button>
+        <div className="min-h-0 flex-1 overflow-y-auto lg:grid lg:grid-cols-[minmax(0,1fr)_400px] lg:overflow-hidden">
+          <section className="p-4 sm:p-6 lg:overflow-y-auto">
+            <div className="mb-4">
+              <h3 className="font-semibold text-gray-950">Add products</h3>
+              <div className="relative mt-3">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="search"
+                  autoFocus
+                  value={productQuery}
+                  onChange={(event) => setProductQuery(event.target.value)}
+                  placeholder="Search product name or code"
+                  className="h-12 w-full rounded-md border border-gray-300 pl-11 pr-4 text-base text-gray-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                />
+              </div>
             </div>
 
-            {/* Items List */}
-            {orderItems.length > 0 && (
-              <div className="space-y-2">
-                {orderItems.map((item) => (
-                  <div key={item.product_id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <div>
-                      <span className="font-medium">{item.product_name}</span>
-                      <span className="text-gray-600 ml-2">x{item.quantity}</span>
+            <div className="divide-y divide-gray-100 rounded-md border border-gray-200">
+              {productResults.length === 0 ? (
+                <div className="px-4 py-12 text-center">
+                  <Package className="mx-auto h-8 w-8 text-gray-300" />
+                  <p className="mt-2 text-sm font-medium text-gray-900">No available products found</p>
+                </div>
+              ) : productResults.map((product) => {
+                const inCart = orderItems.find((item) => item.product_id === product.id)?.quantity || 0;
+                return (
+                  <button
+                    key={product.id}
+                    type="button"
+                    onClick={() => addProduct(product)}
+                    className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-gray-950 sm:text-base">{product.commercial_name}</p>
+                      <p className="mt-0.5 text-xs text-gray-500">{product.code} · {product.current_stock} available</p>
                     </div>
-                    <div className="flex items-center space-x-3">
-                      <span className="font-medium">{formatCurrency(item.total_price)}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeItem(item.product_id)}
-                        className="text-red-600 hover:text-red-800"
-                      >
-                        <Trash2 className="w-4 h-4" />
+                    <p className="whitespace-nowrap text-sm font-semibold text-gray-900">{formatCurrency(product.price)}</p>
+                    <span className={`flex h-9 w-9 items-center justify-center rounded-md ${inCart ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-950 text-white'}`}>
+                      {inCart ? <span className="text-sm font-bold">{inCart}</span> : <Plus className="h-4 w-4" />}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <aside className="border-t border-gray-200 bg-gray-50 p-4 sm:p-6 lg:overflow-y-auto lg:border-l lg:border-t-0">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-gray-950">Sale items</h3>
+              <span className="text-sm text-gray-500">{orderItems.length} products</span>
+            </div>
+
+            {orderItems.length === 0 ? (
+              <div className="mt-4 rounded-md border border-dashed border-gray-300 bg-white px-4 py-10 text-center">
+                <ShoppingCart className="mx-auto h-8 w-8 text-gray-300" />
+                <p className="mt-2 text-sm text-gray-500">Select a product to begin</p>
+              </div>
+            ) : (
+              <div className="mt-4 space-y-2">
+                {orderItems.map((item) => (
+                  <div key={item.product_id} className="rounded-md border border-gray-200 bg-white p-3">
+                    <div className="flex items-start gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-gray-950">{item.product_name}</p>
+                        <p className="mt-0.5 text-xs text-gray-500">{formatCurrency(item.unit_price)} each</p>
+                      </div>
+                      <p className="whitespace-nowrap text-sm font-semibold text-gray-950">{formatCurrency(item.total_price)}</p>
+                    </div>
+                    <div className="mt-3 flex items-center justify-between">
+                      <div className="flex h-9 items-center rounded-md border border-gray-300 bg-white">
+                        <button type="button" onClick={() => updateQuantity(item.product_id, item.quantity - 1)} className="flex h-8 w-9 items-center justify-center text-gray-600 hover:bg-gray-50" title="Decrease quantity">
+                          <Minus className="h-4 w-4" />
+                        </button>
+                        <span className="min-w-9 text-center text-sm font-semibold text-gray-900">{item.quantity}</span>
+                        <button type="button" onClick={() => updateQuantity(item.product_id, item.quantity + 1)} className="flex h-8 w-9 items-center justify-center text-gray-600 hover:bg-gray-50" title="Increase quantity">
+                          <Plus className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <button type="button" onClick={() => setOrderItems((current) => current.filter((line) => line.product_id !== item.product_id))} className="flex h-9 w-9 items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-700" title="Remove product">
+                        <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
                   </div>
                 ))}
-                <div className="text-right pt-2 border-t border-gray-200">
-                  <span className="text-lg font-bold">Total: {formatCurrency(totalAmount)}</span>
-                </div>
               </div>
             )}
-          </div>
 
-          {/* Notes */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-            <textarea
-              value={formData.notes}
-              onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-              rows={3}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
+            <div className="mt-5 space-y-3 border-t border-gray-200 pt-5">
+              <div>
+                <label className="mb-1.5 flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <UserRound className="h-4 w-4 text-gray-400" />
+                  Customer
+                </label>
+                <input value={customerName} onChange={(event) => setCustomerName(event.target.value)} className="h-11 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700">Phone <span className="font-normal text-gray-400">optional</span></label>
+                <input type="tel" value={customerPhone} onChange={(event) => setCustomerPhone(event.target.value)} placeholder="Customer phone" className="h-11 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
+              </div>
+              <button type="button" onClick={() => setShowMore((value) => !value)} className="flex w-full items-center justify-between rounded-md py-2 text-sm font-medium text-gray-600 hover:text-gray-950">
+                More details
+                <ChevronDown className={`h-4 w-4 transition-transform ${showMore ? 'rotate-180' : ''}`} />
+              </button>
+              {showMore && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Order type</label>
+                    <select value={orderType} onChange={(event) => setOrderType(event.target.value)} className="h-11 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100">
+                      <option value="store-to-shop">Local sale</option>
+                      <option value="international-to-tanzania">International delivery</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Email</label>
+                    <input type="email" value={customerEmail} onChange={(event) => setCustomerEmail(event.target.value)} className="h-11 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Notes</label>
+                    <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} className="w-full resize-none rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
+                  </div>
+                </div>
+              )}
+            </div>
+          </aside>
+        </div>
 
-          <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={!formData.customerName || orderItems.length === 0}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-lg transition-colors"
-            >
-              {order ? 'Update Order' : 'Create Order'}
+        <footer className="shrink-0 border-t border-gray-200 bg-white px-4 py-3 sm:px-6">
+          {saveError && <p className="mb-2 text-sm font-medium text-red-700">{saveError}</p>}
+          <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-gray-500">Total</p>
+              <p className="truncate text-xl font-semibold text-gray-950">{formatCurrency(totalAmount)}</p>
+            </div>
+            <button type="button" onClick={onClose} disabled={isSaving} className="hidden h-11 rounded-md border border-gray-300 px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 sm:block">Cancel</button>
+            <button type="submit" disabled={orderItems.length === 0 || isSaving} className="flex h-12 min-w-36 items-center justify-center gap-2 rounded-md bg-emerald-600 px-5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-300">
+              {isSaving ? 'Saving...' : <><Check className="h-4 w-4" />{order ? 'Save changes' : 'Save sale'}</>}
             </button>
           </div>
-        </form>
-      </div>
+        </footer>
+      </form>
     </div>
   );
 };
 
-// Order Detail Modal Component
 interface OrderDetailModalProps {
   order: Order;
   products: Product[];
   onClose: () => void;
-  onUpdateStatus: (orderId: string, status: string) => void;
+  onUpdateStatus: (status: Order['status']) => void | Promise<void>;
 }
 
 const OrderDetailModal: React.FC<OrderDetailModalProps> = ({ order, products, onClose, onUpdateStatus }) => {
-  const displayItems = resolveOrderItemsForDisplay(order, products);
+  const displayItems = resolveOrderItemsForDisplay(
+    order,
+    products as Parameters<typeof resolveOrderItemsForDisplay>[1]
+  );
   const orderGrandTotal = resolveOrderGrandTotal(order);
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-gray-900">Order Details</h2>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-              ×
-            </button>
+    <div className="fixed inset-0 z-50 !mt-0 flex items-end justify-center bg-gray-950/55 sm:items-center sm:p-4">
+      <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-md bg-white shadow-2xl sm:max-w-2xl sm:rounded-md">
+        <header className="sticky top-0 flex items-center justify-between border-b border-gray-200 bg-white px-4 py-4 sm:px-6">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-950">{order.order_number}</h2>
+            <p className="text-sm text-gray-500">{formatDate(order.created_at)}</p>
           </div>
-        </div>
+          <button type="button" onClick={onClose} className="flex h-10 w-10 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100" title="Close">
+            <X className="h-5 w-5" />
+          </button>
+        </header>
 
-        <div className="p-6 space-y-6">
-          {/* Order Info */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-sm font-medium text-gray-700">Order Number</p>
-              <p className="text-lg font-semibold text-gray-900">{order.order_number}</p>
+        <div className="space-y-6 p-4 sm:p-6">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-md bg-gray-50 p-4">
+              <p className="text-xs font-medium uppercase text-gray-500">Customer</p>
+              <p className="mt-1 font-semibold text-gray-950">{order.customer_name || 'Walk-in customer'}</p>
+              {order.customer_phone && <p className="mt-1 text-sm text-gray-600">{order.customer_phone}</p>}
             </div>
-            <div>
-              <p className="text-sm font-medium text-gray-700">Status</p>
-              <select
-                value={order.status}
-                onChange={(e) => onUpdateStatus(order.id, e.target.value)}
-                className="mt-1 px-3 py-1 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
+            <div className="rounded-md bg-gray-50 p-4">
+              <label className="text-xs font-medium uppercase text-gray-500">Status</label>
+              <select value={order.status} onChange={(event) => onUpdateStatus(event.target.value as Order['status'])} className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm font-medium capitalize outline-none focus:border-emerald-500">
                 <option value="pending">Pending</option>
                 <option value="processing">Processing</option>
                 <option value="shipped">Shipped</option>
-
                 <option value="delivered">Delivered</option>
                 <option value="cancelled">Cancelled</option>
               </select>
             </div>
           </div>
 
-          {/* Customer Info */}
-          <div>
-            <h3 className="text-lg font-medium text-gray-900 mb-3">Customer Information</h3>
-            <div className="bg-gray-50 rounded-lg p-4 space-y-2">
-                          <p><span className="font-medium">Name:</span> {order.customer_name}</p>
-            <p><span className="font-medium">Email:</span> {order.customer_email}</p>
-            <p><span className="font-medium">Phone:</span> {order.customer_phone}</p>
+          <section>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="font-semibold text-gray-950">Items</h3>
+              <span className="text-sm text-gray-500">{displayItems.length} products</span>
             </div>
-          </div>
-
-          {/* Order Items */}
-          <div>
-            <h3 className="text-lg font-medium text-gray-900 mb-3">Order Items</h3>
-            <div className="space-y-2">
+            <div className="divide-y divide-gray-100 rounded-md border border-gray-200">
               {displayItems.map((item) => (
-                <div key={item.key} className="flex justify-between items-center gap-4 p-3 bg-gray-50 rounded-lg">
-                  <div>
-                    <p className="font-medium">{item.product_name}</p>
-                    <p className="text-sm text-gray-600">Quantity: {item.quantity} x {formatCurrency(item.unit_price)}</p>
+                <div key={item.key} className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-gray-950">{item.product_name}</p>
+                    <p className="mt-0.5 text-xs text-gray-500">{item.quantity} x {formatCurrency(item.unit_price)}</p>
                   </div>
-                  <p className="font-medium">{formatCurrency(item.total_price)}</p>
+                  <p className="text-sm font-semibold text-gray-950">{formatCurrency(item.total_price)}</p>
                 </div>
               ))}
-              <div className="text-right pt-2 border-t border-gray-200">
-                <p className="text-xl font-bold">Total: {formatCurrency(orderGrandTotal)}</p>
-              </div>
             </div>
-          </div>
+          </section>
 
           {order.notes && (
-            <div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Notes</h3>
-              <p className="text-gray-600 bg-gray-50 rounded-lg p-3">{order.notes}</p>
-            </div>
+            <section>
+              <h3 className="mb-2 font-semibold text-gray-950">Notes</h3>
+              <p className="rounded-md bg-gray-50 p-4 text-sm text-gray-700">{order.notes}</p>
+            </section>
           )}
+
+          <div className="flex items-end justify-between border-t border-gray-200 pt-4">
+            <p className="text-sm text-gray-500">Order total</p>
+            <p className="text-2xl font-semibold text-gray-950">{formatCurrency(orderGrandTotal)}</p>
+          </div>
         </div>
       </div>
     </div>

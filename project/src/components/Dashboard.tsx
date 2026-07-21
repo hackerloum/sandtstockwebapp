@@ -1,608 +1,218 @@
-import React, { useMemo, useEffect, useState } from 'react';
+import React, { useMemo } from 'react';
 import {
-  Package, AlertTriangle, TrendingDown, DollarSign,
-  ShoppingCart, Clock, BarChart2, Plus, FileText, RefreshCcw, Zap,
-  TrendingUp, Ban, FileDown
+  AlertTriangle,
+  ArrowRight,
+  ArrowUpDown,
+  Boxes,
+  FileText,
+  Package,
+  Plus,
+  ShoppingCart,
+  WalletCards
 } from 'lucide-react';
 import { IncomingByProductSummary, Order, Product, StockMovement } from '../types';
-import {
-  getStockStatus,
-  formatCurrency,
-  formatDate,
-  calculateReorderQuantity,
-  buildReorderPlan,
-  formatOutTimelineSummary,
-  formatSalesOrderTimelineSummary,
-  recentWindowDemandQty
-} from '../utils/stockUtils';
-import { downloadReorderSectionPdf } from '../utils/pdfUtils';
-import { getProducts, getStockMovements, getOrders } from '../lib/supabase';
+import { formatCurrency, formatDate, resolveOrderGrandTotal } from '../utils/stockUtils';
 
 interface DashboardProps {
+  products: Product[];
+  movements: StockMovement[];
+  orders: Order[];
+  loading?: boolean;
   onCreatePurchaseOrder?: (productId: string) => void;
   onAddProduct?: () => void;
   onCreateOrder?: () => void;
   onStockCount?: () => void;
   onNavigate?: (tab: string) => void;
   incomingByProduct?: IncomingByProductSummary[];
-  /** Opens the full reorder engine page (all items). */
   onOpenReorderEngine?: () => void;
 }
 
+const isToday = (value: string | Date) => {
+  const date = new Date(value);
+  const today = new Date();
+  return date.getFullYear() === today.getFullYear()
+    && date.getMonth() === today.getMonth()
+    && date.getDate() === today.getDate();
+};
+
 export const Dashboard: React.FC<DashboardProps> = ({
+  products,
+  movements,
+  orders,
+  loading = false,
   onCreatePurchaseOrder,
   onAddProduct,
-  onCreateOrder,
   onStockCount,
-  onNavigate,
-  incomingByProduct,
-  onOpenReorderEngine
+  onNavigate
 }) => {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [movements, setMovements] = useState<StockMovement[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        const [productsData, movementsData, ordersData] = await Promise.all([
-          getProducts(),
-          getStockMovements(),
-          getOrders()
-        ]);
-        setProducts(productsData || []);
-        setMovements(movementsData || []);
-        setOrders(Array.isArray(ordersData) ? ordersData : []);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch data');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, []);
-
-  // Basic Stats
-  const totalProducts = products?.length || 0;
-  const outOfStock = products?.filter(p => getStockStatus(p) === 'out').length || 0;
-  const lowStock = products?.filter(p => getStockStatus(p) === 'low').length || 0;
-  
-  // Inventory Value
-  const totalValue = products?.reduce((sum, product) => sum + (product.current_stock * product.price), 0) || 0;
-  
-  // Top Products by Value
-  const topProductsByValue = useMemo(() => {
-    if (!products) return [];
-    return [...products]
-      .sort((a, b) => (b.current_stock * b.price) - (a.current_stock * a.price))
-      .slice(0, 5);
-  }, [products]);
-
-  // Top Products by Movement (any direction — for recent activity list)
-  const topProductsByMovement = useMemo(() => {
-    if (!products || !movements) return [];
-    const movementCounts = movements.reduce((acc, movement) => {
-      acc[movement.product_id] = (acc[movement.product_id] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    return [...products]
-      .sort((a, b) => (movementCounts[b.id] || 0) - (movementCounts[a.id] || 0))
-      .slice(0, 5);
-  }, [products, movements]);
-
-  const incomingMap = useMemo(
-    () => new Map((incomingByProduct ?? []).map((x) => [x.product_id, x] as const)),
-    [incomingByProduct]
+  const recentOrders = useMemo(
+    () => [...orders]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 6),
+    [orders]
   );
 
-  const reorderPlanFull = useMemo(
-    () => buildReorderPlan(products, movements, { unlimited: true, orders, incomingByProduct: incomingMap }),
-    [products, movements, orders, incomingMap]
+  const todayOrders = useMemo(
+    () => orders.filter((order) => order.status !== 'cancelled' && isToday(order.created_at)),
+    [orders]
   );
 
-  const reorderPlan = useMemo(
-    () => ({
-      orderNow: reorderPlanFull.orderNow.slice(0, 8),
-      prioritizeReorder: reorderPlanFull.prioritizeReorder.slice(0, 8),
-      reviewBeforeOrder: reorderPlanFull.reviewBeforeOrder.slice(0, 8)
-    }),
-    [reorderPlanFull]
+  const stockAttention = useMemo(
+    () => products
+      .filter((product) => product.current_stock <= product.min_stock)
+      .sort((a, b) => a.current_stock - b.current_stock)
+      .slice(0, 6),
+    [products]
   );
+
+  const inventoryValue = useMemo(
+    () => products.reduce((sum, product) => sum + (product.current_stock * product.price), 0),
+    [products]
+  );
+
+  const todayRevenue = todayOrders.reduce((sum, order) => sum + resolveOrderGrandTotal(order), 0);
+  const pendingOrders = orders.filter((order) => order.status === 'pending').length;
+  const todayMovements = movements.filter((movement) => isToday(movement.performed_at)).length;
 
   const stats = [
-    {
-      title: 'Total Products',
-      value: totalProducts,
-      icon: Package,
-      color: 'bg-blue-500',
-      textColor: 'text-blue-600',
-      description: 'Total number of unique products'
-    },
-    {
-      title: 'Out of Stock',
-      value: outOfStock,
-      icon: AlertTriangle,
-      color: 'bg-red-500',
-      textColor: 'text-red-600',
-      description: 'Products with zero stock'
-    },
-    {
-      title: 'Low Stock',
-      value: lowStock,
-      icon: TrendingDown,
-      color: 'bg-yellow-500',
-      textColor: 'text-yellow-600',
-      description: 'Products below minimum stock level'
-    },
-    {
-      title: 'Total Value',
-      value: formatCurrency(totalValue),
-      icon: DollarSign,
-      color: 'bg-green-500',
-      textColor: 'text-green-600',
-      description: 'Total inventory value'
-    }
+    { label: 'Sales today', value: formatCurrency(todayRevenue), icon: WalletCards, tone: 'text-emerald-700 bg-emerald-50' },
+    { label: 'Orders today', value: todayOrders.length.toLocaleString(), icon: ShoppingCart, tone: 'text-blue-700 bg-blue-50' },
+    { label: 'Pending orders', value: pendingOrders.toLocaleString(), icon: FileText, tone: 'text-amber-700 bg-amber-50' },
+    { label: 'Inventory value', value: formatCurrency(inventoryValue), icon: Boxes, tone: 'text-violet-700 bg-violet-50' }
   ];
 
-  const quickActions = [
-    { 
-      title: 'New Order', 
-      icon: ShoppingCart, 
-      onClick: () => onCreateOrder?.(), 
-      color: 'bg-blue-500',
-      disabled: !onCreateOrder
-    },
-    { 
-      title: 'Add Product', 
-      icon: Plus, 
-      onClick: () => onAddProduct?.(), 
-      color: 'bg-green-500',
-      disabled: !onAddProduct
-    },
-    { 
-      title: 'Purchase Order', 
-      icon: FileText, 
-      onClick: () => onNavigate?.('purchase-orders'), 
-      color: 'bg-purple-500',
-      disabled: !onNavigate
-    },
-    {
-      title: 'Upcoming Invoices',
-      icon: FileDown,
-      onClick: () => onNavigate?.('upcoming-invoices'),
-      color: 'bg-indigo-500',
-      disabled: !onNavigate
-    },
-    { 
-      title: 'Stock Count', 
-      icon: RefreshCcw, 
-      onClick: () => onStockCount?.(), 
-      color: 'bg-orange-500',
-      disabled: !onStockCount
-    }
-  ];
+  if (loading && products.length === 0 && orders.length === 0) {
+    return (
+      <div className="space-y-5" aria-label="Loading dashboard">
+        <div className="h-20 animate-pulse rounded-md bg-gray-200" />
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((item) => <div key={item} className="h-28 animate-pulse rounded-md bg-gray-200" />)}
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-8">
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {quickActions.map((action) => {
-          const Icon = action.icon;
-          return (
-            <button
-              key={action.title}
-              onClick={action.onClick}
-              className={`flex items-center space-x-3 p-4 bg-white rounded-xl shadow-sm border border-gray-200 transition-all ${
-                action.disabled 
-                  ? 'opacity-50 cursor-not-allowed' 
-                  : 'hover:shadow-md hover:bg-gray-50 cursor-pointer'
-              }`}
-              disabled={action.disabled}
-            >
-              <div className={`${action.color} rounded-lg p-3`}>
-                <Icon className="w-5 h-5 text-white" />
-              </div>
-              <span className="font-medium text-gray-900">{action.title}</span>
-            </button>
-          );
-        })}
-      </div>
+    <div className="space-y-7">
+      <header>
+        <div>
+          <p className="text-sm font-medium text-gray-500">{formatDate(new Date())}</p>
+          <h1 className="mt-1 text-2xl font-semibold text-gray-950 sm:text-3xl">Business overview</h1>
+          <p className="mt-1 text-sm text-gray-500">{todayMovements} stock changes recorded today</p>
+        </div>
+      </header>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {stats.map((stat) => {
           const Icon = stat.icon;
           return (
-            <div key={stat.title} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between mb-4">
-                <div className={`${stat.color} rounded-lg p-3`}>
-                  <Icon className="w-6 h-6 text-white" />
-                </div>
-                <span className="text-sm text-gray-500">{formatDate(new Date())}</span>
+            <div key={stat.label} className="min-w-0 rounded-md border border-gray-200 bg-white p-4 sm:p-5">
+              <div className={`mb-4 flex h-9 w-9 items-center justify-center rounded-md ${stat.tone}`}>
+                <Icon className="h-4 w-4" />
               </div>
-              <p className="text-sm font-medium text-gray-600">{stat.title}</p>
-              <p className={`text-3xl font-bold ${stat.textColor} mt-1`}>{stat.value}</p>
-              <p className="text-sm text-gray-500 mt-2">{stat.description}</p>
+              <p className="truncate text-xs font-medium text-gray-500 sm:text-sm">{stat.label}</p>
+              <p className="mt-1 break-words text-lg font-semibold text-gray-950 sm:text-2xl">{stat.value}</p>
             </div>
           );
         })}
-      </div>
+      </section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Reorder engine: who to stock vs who to verify first */}
-        {!loading && products.length > 0 && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 lg:col-span-2">
-            <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                  <Zap className="w-5 h-5 text-amber-500 shrink-0" />
-                  Reorder engine
-                </h3>
-                <p className="text-sm text-gray-500 mt-1">
-                  Demand combines <strong className="font-medium text-gray-700">stock-outs</strong> and{' '}
-                  <strong className="font-medium text-gray-700">customer orders</strong> (by order date) across the same
-                  timeline. <strong className="font-medium text-gray-700">Order now</strong> is ranked by recent timeline
-                  activity first. Suggested quantities scale with demand (up to 100 units per SKU when headroom allows).
-                </p>
-              </div>
-              {onOpenReorderEngine && (
-                <button
-                  type="button"
-                  onClick={onOpenReorderEngine}
-                  className="shrink-0 text-sm font-medium text-amber-800 bg-amber-100 hover:bg-amber-200 px-4 py-2 rounded-lg border border-amber-200 transition-colors"
-                >
-                  View full list
-                </button>
-              )}
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Order now */}
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4">
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Zap className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <h4 className="font-semibold text-emerald-900">Order now</h4>
-                  </div>
-                  <button
-                    type="button"
-                    title="Download PDF of this list"
-                    onClick={() =>
-                      downloadReorderSectionPdf('order-now', 'Order now', reorderPlanFull.orderNow)
-                    }
-                    disabled={reorderPlanFull.orderNow.length === 0}
-                    className="inline-flex items-center gap-1 shrink-0 text-xs font-medium text-emerald-900 bg-emerald-100 hover:bg-emerald-200 disabled:opacity-40 disabled:pointer-events-none px-2 py-1 rounded-md border border-emerald-200"
-                  >
-                    <FileDown className="w-3.5 h-3.5" />
-                    PDF
-                  </button>
-                </div>
-                <p className="text-xs text-emerald-800/80 mb-3">
-                  Out of stock with demand from stock-outs and/or sales orders on the timeline.
-                </p>
-                {reorderPlan.orderNow.length === 0 ? (
-                  <p className="text-sm text-gray-500">None right now.</p>
-                ) : (
-                  <ul className="space-y-3">
-                    {reorderPlan.orderNow.map((row) => (
-                      <li
-                        key={row.product.id}
-                        className="rounded-lg bg-white border border-emerald-100 p-3 text-sm"
-                      >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-medium text-gray-900">{row.product.commercial_name}</p>
-                          {row.demandPriority === 'critical' && (
-                            <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-red-100 text-red-800 border border-red-200">
-                              Critical
-                            </span>
-                          )}
-                          {row.demandPriority === 'high' && (
-                            <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-200">
-                              High
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-gray-600 mt-1">
-                          Recent demand (today + last 7d): ~{recentWindowDemandQty(row.analytics)} units
-                        </p>
-                        <p className="text-xs text-gray-600 mt-1">
-                          Stock-outs: {formatOutTimelineSummary(row.analytics.timelineBreakdown)}
-                        </p>
-                        <p className="text-xs text-gray-600 mt-1">
-                          Sales orders: {formatSalesOrderTimelineSummary(row.analytics.salesOrderTimelineBreakdown)}
-                        </p>
-                        <p className="text-sm font-medium text-emerald-900 mt-2">
-                          Suggested order: {row.suggestedOrderQty} units
-                        </p>
-                        {row.incomingShipment && (
-                          <p className="text-xs text-blue-700 mt-1">
-                            Incoming: {row.incomingShipment.total_incoming_kg.toFixed(2)} kg
-                            {row.incomingShipment.earliest_arrival_date
-                              ? ` · ETA ${row.incomingShipment.earliest_arrival_date}`
-                              : ''}
-                          </p>
-                        )}
-                        <p className="text-xs text-gray-500 mt-1">{row.rationale}</p>
-                        {onCreatePurchaseOrder && (
-                          <button
-                            type="button"
-                            onClick={() => onCreatePurchaseOrder(row.product.id)}
-                            className="mt-2 w-full px-3 py-1.5 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
-                          >
-                            Create purchase order
-                          </button>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              {/* Plan reorder */}
-              <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4">
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <TrendingUp className="w-4 h-4 text-amber-700 shrink-0" />
-                    <h4 className="font-semibold text-amber-950">Plan reorder</h4>
-                  </div>
-                  <button
-                    type="button"
-                    title="Download PDF of this list"
-                    onClick={() =>
-                      downloadReorderSectionPdf(
-                        'plan-reorder',
-                        'Plan reorder',
-                        reorderPlanFull.prioritizeReorder
-                      )
-                    }
-                    disabled={reorderPlanFull.prioritizeReorder.length === 0}
-                    className="inline-flex items-center gap-1 shrink-0 text-xs font-medium text-amber-950 bg-amber-100 hover:bg-amber-200 disabled:opacity-40 disabled:pointer-events-none px-2 py-1 rounded-md border border-amber-200"
-                  >
-                    <FileDown className="w-3.5 h-3.5" />
-                    PDF
-                  </button>
-                </div>
-                <p className="text-xs text-amber-900/80 mb-3">
-                  In stock but selling or moving fast — stay ahead of stock-outs.
-                </p>
-                {reorderPlan.prioritizeReorder.length === 0 ? (
-                  <p className="text-sm text-gray-500">None right now.</p>
-                ) : (
-                  <ul className="space-y-3">
-                    {reorderPlan.prioritizeReorder.map((row) => (
-                      <li
-                        key={row.product.id}
-                        className="rounded-lg bg-white border border-amber-100 p-3 text-sm"
-                      >
-                        <p className="font-medium text-gray-900">{row.product.commercial_name}</p>
-                        <p className="text-gray-600 mt-1">
-                          Stock {row.product.current_stock} · Movements (all time) {row.analytics.totalMovementsAll}
-                        </p>
-                        <p className="text-xs text-gray-600 mt-1">
-                          Stock-outs: {formatOutTimelineSummary(row.analytics.timelineBreakdown)}
-                        </p>
-                        <p className="text-xs text-gray-600 mt-1">
-                          Sales orders: {formatSalesOrderTimelineSummary(row.analytics.salesOrderTimelineBreakdown)}
-                        </p>
-                        <p className="text-sm font-medium text-amber-950 mt-2">
-                          Suggested order: {row.suggestedOrderQty} units
-                        </p>
-                        {row.incomingShipment && (
-                          <p className="text-xs text-blue-700 mt-1">
-                            Incoming: {row.incomingShipment.total_incoming_kg.toFixed(2)} kg
-                            {row.incomingShipment.earliest_arrival_date
-                              ? ` · ETA ${row.incomingShipment.earliest_arrival_date}`
-                              : ''}
-                          </p>
-                        )}
-                        <p className="text-xs text-gray-500 mt-1">{row.rationale}</p>
-                        {onCreatePurchaseOrder && (
-                          <button
-                            type="button"
-                            onClick={() => onCreatePurchaseOrder(row.product.id)}
-                            className="mt-2 w-full px-3 py-1.5 text-sm font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700"
-                          >
-                            Create purchase order
-                          </button>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              {/* Do not auto-order */}
-              <div className="rounded-xl border border-slate-300 bg-slate-50 p-4">
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Ban className="w-4 h-4 text-slate-600 shrink-0" />
-                    <h4 className="font-semibold text-slate-900">Do not auto-order</h4>
-                  </div>
-                  <button
-                    type="button"
-                    title="Download PDF of this list"
-                    onClick={() =>
-                      downloadReorderSectionPdf(
-                        'do-not-order',
-                        'Do not auto-order',
-                        reorderPlanFull.reviewBeforeOrder
-                      )
-                    }
-                    disabled={reorderPlanFull.reviewBeforeOrder.length === 0}
-                    className="inline-flex items-center gap-1 shrink-0 text-xs font-medium text-slate-800 bg-slate-200 hover:bg-slate-300 disabled:opacity-40 disabled:pointer-events-none px-2 py-1 rounded-md border border-slate-300"
-                  >
-                    <FileDown className="w-3.5 h-3.5" />
-                    PDF
-                  </button>
-                </div>
-                <p className="text-xs text-slate-600 mb-3">
-                  At zero with no stock-outs and no customer order lines on the timeline — review before buying.
-                </p>
-                {reorderPlan.reviewBeforeOrder.length === 0 ? (
-                  <p className="text-sm text-gray-500">None right now.</p>
-                ) : (
-                  <ul className="space-y-3">
-                    {reorderPlan.reviewBeforeOrder.map((row) => (
-                      <li
-                        key={row.product.id}
-                        className="rounded-lg bg-white border border-slate-200 p-3 text-sm"
-                      >
-                        <p className="font-medium text-gray-900">{row.product.commercial_name}</p>
-                        <p className="text-gray-600 mt-1">
-                          Stock 0 · Movements (all time) {row.analytics.totalMovementsAll}
-                        </p>
-                        <p className="text-xs text-gray-600 mt-1">
-                          Stock-outs: {formatOutTimelineSummary(row.analytics.timelineBreakdown)}
-                        </p>
-                        <p className="text-xs text-gray-600 mt-1">
-                          Sales orders: {formatSalesOrderTimelineSummary(row.analytics.salesOrderTimelineBreakdown)}
-                        </p>
-                        <p className="text-sm text-slate-700 mt-2">
-                          Reference qty (if you restock): {row.suggestedOrderQty} units
-                        </p>
-                        {row.incomingShipment && (
-                          <p className="text-xs text-blue-700 mt-1">
-                            Incoming: {row.incomingShipment.total_incoming_kg.toFixed(2)} kg
-                            {row.incomingShipment.earliest_arrival_date
-                              ? ` · ETA ${row.incomingShipment.earliest_arrival_date}`
-                              : ''}
-                          </p>
-                        )}
-                        <p className="text-xs text-slate-600 mt-1">{row.rationale}</p>
-                        <p className="mt-2 text-xs font-medium text-slate-500 uppercase tracking-wide">
-                          No suggested PO — verify first
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Stock Alerts */}
-        {(outOfStock > 0 || lowStock > 0) && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-                <AlertTriangle className="w-5 h-5 text-yellow-500 mr-2" />
-                Stock Alerts
-              </h3>
-              <button className="text-sm text-blue-600 hover:text-blue-800">View All</button>
-            </div>
-            <div className="space-y-4">
-              {products
-                .filter(p => ['out', 'low'].includes(getStockStatus(p)))
-                .slice(0, 5)
-                .map(product => {
-                  const reorderQty = calculateReorderQuantity(product);
-                  return (
-                    <div key={product.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-3">
-                          <div className={`w-2 h-2 rounded-full ${
-                            getStockStatus(product) === 'out' ? 'bg-red-500' : 'bg-yellow-500'
-                          }`} />
-                          <p className="font-medium text-gray-900">{product.commercial_name}</p>
-                        </div>
-                        <p className="text-sm text-gray-600 mt-1">
-                          Current: {product.current_stock} | Min: {product.min_stock} | Reorder: {reorderQty}
-                        </p>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        {onCreatePurchaseOrder && (
-                          <button
-                            onClick={() => onCreatePurchaseOrder(product.id)}
-                            className="px-3 py-1 text-sm bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100"
-                          >
-                            Order Stock
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-            </div>
-          </div>
-        )}
-
-        {/* Top Products by Value */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-              <BarChart2 className="w-5 h-5 text-blue-500 mr-2" />
-              Top Products by Value
-            </h3>
-            <button className="text-sm text-blue-600 hover:text-blue-800">View All</button>
-          </div>
-          <div className="space-y-4">
-            {topProductsByValue.map(product => (
-              <div key={product.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                <div>
-                  <p className="font-medium text-gray-900">{product.commercial_name}</p>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Stock: {product.current_stock} × {formatCurrency(product.price)}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="font-medium text-gray-900">
-                    {formatCurrency(product.current_stock * product.price)}
-                  </p>
-                  <p className="text-sm text-gray-500 mt-1">Total Value</p>
-                </div>
-              </div>
-            ))}
-          </div>
+      <section>
+        <h2 className="mb-3 text-sm font-semibold text-gray-900">Quick actions</h2>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {[
+            { label: 'Products', icon: Package, action: () => onNavigate?.('products') },
+            { label: 'Add product', icon: Plus, action: onAddProduct },
+            { label: 'Stock update', icon: ArrowUpDown, action: onStockCount },
+            { label: 'Reports', icon: FileText, action: () => onNavigate?.('monthly-reports') }
+          ].map((action) => {
+            const Icon = action.icon;
+            return (
+              <button
+                key={action.label}
+                type="button"
+                onClick={action.action}
+                className="flex min-h-16 items-center gap-3 rounded-md border border-gray-200 bg-white px-4 text-left text-sm font-medium text-gray-800 hover:border-gray-300 hover:bg-gray-50"
+              >
+                <Icon className="h-5 w-5 shrink-0 text-gray-500" />
+                <span>{action.label}</span>
+              </button>
+            );
+          })}
         </div>
+      </section>
 
-        {/* Recent Activity */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 lg:col-span-2">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-              <Clock className="w-5 h-5 text-purple-500 mr-2" />
-              Recent Stock Movement
-            </h3>
-            <button className="text-sm text-blue-600 hover:text-blue-800">View All</button>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+        <section className="min-w-0 overflow-hidden rounded-md border border-gray-200 bg-white">
+          <div className="flex items-center justify-between border-b border-gray-200 px-4 py-4 sm:px-5">
+            <div>
+              <h2 className="font-semibold text-gray-950">Recent sales</h2>
+              <p className="mt-0.5 text-sm text-gray-500">Latest customer orders</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate?.('orders')}
+              className="flex items-center gap-1 text-sm font-medium text-emerald-700 hover:text-emerald-800"
+            >
+              View all
+              <ArrowRight className="h-4 w-4" />
+            </button>
           </div>
-          <div className="space-y-4">
-            {topProductsByMovement.map(product => {
-              const productMovements = movements
-                .filter(m => m.product_id === product.id)
-                .slice(0, 2);
-              
-              return (
-                <div key={product.id} className="p-4 bg-gray-50 rounded-lg">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="font-medium text-gray-900">{product.commercial_name}</p>
-                    <p className="text-sm text-gray-500">
-                      Current Stock: {product.current_stock}
-                    </p>
+          {recentOrders.length === 0 ? (
+            <div className="px-5 py-12 text-center text-sm text-gray-500">No sales yet</div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {recentOrders.map((order) => (
+                <div key={order.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3.5 sm:grid-cols-[130px_minmax(0,1fr)_120px_auto] sm:px-5">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">{order.order_number}</p>
+                    <p className="text-xs text-gray-500 sm:hidden">{formatDate(order.created_at)}</p>
                   </div>
-                  <div className="space-y-2">
-                    {productMovements.map((movement, idx) => (
-                      <div key={idx} className="flex items-center justify-between text-sm">
-                        <div className="flex items-center space-x-2">
-                          <div className={`w-2 h-2 rounded-full ${
-                            movement.movement_type === 'in' ? 'bg-green-500' : 'bg-red-500'
-                          }`} />
-                          <span className="text-gray-600">
-                            {movement.movement_type === 'in' ? 'Stock In' : 'Stock Out'}: {movement.quantity} units
-                          </span>
-                        </div>
-                        <span className="text-gray-500">{formatDate(movement.performed_at)}</span>
-                      </div>
-                    ))}
+                  <p className="hidden truncate text-sm text-gray-700 sm:block">{order.customer_name || 'Walk-in customer'}</p>
+                  <p className="hidden text-sm text-gray-500 sm:block">{formatDate(order.created_at)}</p>
+                  <div className="text-right">
+                    <p className="text-sm font-semibold text-gray-950">{formatCurrency(resolveOrderGrandTotal(order))}</p>
+                    <p className="text-xs capitalize text-gray-500">{order.status}</p>
                   </div>
                 </div>
-              );
-            })}
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="min-w-0 overflow-hidden rounded-md border border-gray-200 bg-white">
+          <div className="flex items-center justify-between border-b border-gray-200 px-4 py-4 sm:px-5">
+            <div>
+              <h2 className="font-semibold text-gray-950">Stock attention</h2>
+              <p className="mt-0.5 text-sm text-gray-500">{stockAttention.length} priority items shown</p>
+            </div>
+            <AlertTriangle className="h-5 w-5 text-amber-600" />
           </div>
-        </div>
+          {stockAttention.length === 0 ? (
+            <div className="px-5 py-12 text-center text-sm text-gray-500">Stock levels look healthy</div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {stockAttention.map((product) => (
+                <div key={product.id} className="flex items-center gap-3 px-4 py-3.5 sm:px-5">
+                  <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${product.current_stock === 0 ? 'bg-red-500' : 'bg-amber-500'}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-gray-900">{product.commercial_name}</p>
+                    <p className="text-xs text-gray-500">{product.current_stock} in stock / minimum {product.min_stock}</p>
+                  </div>
+                  {onCreatePurchaseOrder && (
+                    <button
+                      type="button"
+                      onClick={() => onCreatePurchaseOrder(product.id)}
+                      className="rounded-md px-2.5 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                    >
+                      Purchase
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );

@@ -53,7 +53,7 @@ export const PageContainer: React.FC<PageContainerProps> = ({
   className = ''
 }) => {
   return (
-    <div className={`bg-white rounded-xl shadow-sm border border-gray-200 ${className}`}>
+    <div className={`bg-white rounded-md border border-gray-200 ${className}`}>
       {children}
     </div>
   );

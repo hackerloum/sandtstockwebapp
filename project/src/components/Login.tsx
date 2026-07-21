@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LogIn, User, Lock, AlertCircle } from 'lucide-react';
+import { AlertCircle, BarChart3, Lock, User } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export const Login: React.FC = () => {
@@ -9,17 +9,14 @@ export const Login: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setError('');
     setIsLoading(true);
-
     try {
       const success = await login(username, password);
-      if (!success) {
-        setError('Invalid username or password');
-      }
-    } catch (err) {
+      if (!success) setError('Invalid username or password');
+    } catch {
       setError('Login failed. Please try again.');
     } finally {
       setIsLoading(false);
@@ -27,76 +24,66 @@ export const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-      <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8">
-        <div className="text-center mb-8">
-          <div className="mx-auto w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mb-4">
-            <LogIn className="w-8 h-8 text-white" />
+    <main className="flex min-h-screen items-center justify-center bg-gray-100 px-4 py-10">
+      <div className="w-full max-w-md">
+        <div className="mb-6 flex items-center justify-center gap-3">
+          <span className="flex h-11 w-11 items-center justify-center rounded-md bg-gray-950 text-white">
+            <BarChart3 className="h-6 w-6" />
+          </span>
+          <div>
+            <h1 className="text-xl font-semibold text-gray-950">S&amp;T Stock</h1>
+            <p className="text-sm text-gray-500">Stock and sales management</p>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">StockTracker Pro</h1>
-          <p className="text-gray-600 mt-2">Sign in to your account</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Username
-            </label>
-            <div className="relative">
-              <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter your username"
-                required
-              />
+        <section className="rounded-md border border-gray-200 bg-white p-5 shadow-sm sm:p-7">
+          <h2 className="text-xl font-semibold text-gray-950">Sign in</h2>
+          <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700">Username</label>
+              <div className="relative">
+                <User className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  className="h-12 w-full rounded-md border border-gray-300 pl-11 pr-4 text-base outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                  autoComplete="username"
+                  required
+                />
+              </div>
             </div>
-          </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Password
-            </label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter your password"
-                required
-              />
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700">Password</label>
+              <div className="relative">
+                <Lock className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="h-12 w-full rounded-md border border-gray-300 pl-11 pr-4 text-base outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                  autoComplete="current-password"
+                  required
+                />
+              </div>
             </div>
-          </div>
 
-          {error && (
-            <div className="flex items-center space-x-2 text-red-600 bg-red-50 p-3 rounded-lg">
-              <AlertCircle className="w-5 h-5" />
-              <span className="text-sm">{error}</span>
-            </div>
-          )}
+            {error && (
+              <div className="flex items-center gap-2 rounded-md bg-red-50 p-3 text-sm font-medium text-red-700">
+                <AlertCircle className="h-5 w-5 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
 
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white py-3 rounded-lg font-medium transition-colors"
-          >
-            {isLoading ? 'Signing in...' : 'Sign In'}
-          </button>
-        </form>
+            <button type="submit" disabled={isLoading} className="h-12 w-full rounded-md bg-gray-950 text-sm font-semibold text-white hover:bg-gray-800 disabled:bg-gray-400">
+              {isLoading ? 'Signing in...' : 'Sign in'}
+            </button>
+          </form>
+        </section>
 
-        <div className="mt-8 p-4 bg-gray-50 rounded-lg">
-          <h3 className="text-sm font-medium text-gray-700 mb-2">Demo Accounts:</h3>
-          <div className="space-y-1 text-xs text-gray-600">
-            <p><strong>Admin:</strong> username: admin, password: admin</p>
-            <p><strong>Manager:</strong> username: manager, password: manager</p>
-            <p><strong>Staff:</strong> username: staff, password: staff</p>
-          </div>
-        </div>
+        <p className="mt-4 text-center text-xs text-gray-500">Admin demo: admin / admin</p>
       </div>
-    </div>
+    </main>
   );
 };

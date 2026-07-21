@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { BarChart3, Package, ArrowUpDown, Home, Plus, ShoppingCart, FileText, Activity, LogOut, Menu, AlertCircle, X, CheckCircle, Zap, CalendarDays } from 'lucide-react';
-import { Product, StockMovement, Order, PurchaseOrder, Brand, Supplier, ActivityLog } from './types';
+import { useState, useRef, useEffect } from 'react';
+import { BarChart3, Package, ArrowUpDown, Home, Plus, ShoppingCart, FileText, Activity, LogOut, Menu, AlertCircle, X, CheckCircle, Zap, CalendarDays, MoreHorizontal } from 'lucide-react';
+import { Product, StockMovement, Order, PurchaseOrder, PurchaseOrderItem, Brand, Supplier, ActivityLog } from './types';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
 import { Dashboard } from './components/Dashboard';
@@ -88,6 +88,7 @@ function AppContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [newOrderSignal, setNewOrderSignal] = useState(0);
   
   const [isProductDetailOpen, setIsProductDetailOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -241,7 +242,6 @@ function AppContent() {
   };
 
   const handleDeleteProduct = async (id: string) => {
-    const product = products.find(p => p.id === id);
     if (window.confirm('Are you sure you want to delete this product?')) {
       try {
         await deleteProduct(id);
@@ -320,7 +320,7 @@ function AppContent() {
     setOrders(prev => prev.filter(o => o.id !== id));
   };
 
-  const handleAddPurchaseOrder = async (po: Omit<PurchaseOrder, 'id' | 'created_at' | 'updated_at'>, items: any[]) => {
+  const handleAddPurchaseOrder = async (po: Omit<PurchaseOrder, 'id' | 'created_at' | 'updated_at'>, items: PurchaseOrderItem[]) => {
     try {
       const newPO = await createPurchaseOrder(po, items);
       setPurchaseOrders(prev => [...prev, newPO]);
@@ -349,8 +349,8 @@ function AppContent() {
   const mainTabs = [
     { id: 'dashboard', label: 'Dashboard', icon: Home, permission: 'view_dashboard' },
     { id: 'products', label: 'Products', icon: Package, permission: 'view_products' },
-    { id: 'orders', label: 'Orders', icon: ShoppingCart, permission: 'view_orders' },
-    { id: 'purchase-orders', label: 'Purchase Orders', icon: FileText, permission: 'view_purchase_orders' },
+    { id: 'orders', label: 'Sales', icon: ShoppingCart, permission: 'view_orders' },
+    { id: 'purchase-orders', label: 'Purchasing', icon: FileText, permission: 'view_purchase_orders' },
   ];
 
   const secondaryTabs = [
@@ -362,7 +362,6 @@ function AppContent() {
     { id: 'product-reports', label: 'Product Reports', icon: FileText, permission: 'view_reports' },
     { id: 'activity', label: 'Activity Log', icon: Activity, permission: 'view_activity_log' },
     { id: 'add-product', label: 'Add Product', icon: Plus, permission: 'add_product' },
-    { id: 'debug', label: 'Debug', icon: BarChart3, permission: 'view_products' },
   ];
 
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
@@ -437,135 +436,153 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <nav ref={navRef} className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            {/* Logo */}
-            <div className="flex items-center">
-              <div className="flex items-center space-x-3">
-                <BarChart3 className="w-8 h-8 text-blue-600" />
-                <h1 className="text-xl font-bold text-gray-900">StockTracker Pro</h1>
+      <nav ref={navRef} className="sticky top-0 z-40 border-b border-gray-200 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex h-16 max-w-screen-2xl items-center gap-3 px-4 sm:px-6 lg:px-8">
+          <button
+            type="button"
+            onClick={() => setActiveTab('dashboard')}
+            className="flex shrink-0 items-center gap-2 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          >
+            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-gray-950 text-white">
+              <BarChart3 className="h-5 w-5" />
+            </span>
+            <span className="hidden text-base font-semibold text-gray-950 sm:block">S&amp;T Stock</span>
+          </button>
+
+          <div className="hidden min-w-0 flex-1 items-center justify-center gap-1 min-[1180px]:flex">
+            {visibleMainTabs.map((tab) => {
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id as ActiveTab)}
+                  className={`flex h-10 items-center gap-2 rounded-md px-3 text-sm font-medium transition-colors ${
+                    activeTab === tab.id
+                      ? 'bg-gray-950 text-white'
+                      : 'text-gray-600 hover:bg-gray-100 hover:text-gray-950'
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+
+            {visibleSecondaryTabs.length > 0 && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
+                  className={`flex h-10 items-center gap-2 rounded-md px-3 text-sm font-medium transition-colors ${
+                    isMoreMenuOpen || visibleSecondaryTabs.some((tab) => tab.id === activeTab)
+                      ? 'bg-gray-100 text-gray-950'
+                      : 'text-gray-600 hover:bg-gray-100 hover:text-gray-950'
+                  }`}
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                  <span>More</span>
+                </button>
+                {isMoreMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-60 rounded-md border border-gray-200 bg-white p-1.5 shadow-xl">
+                    {visibleSecondaryTabs.map((tab) => {
+                      const Icon = tab.icon;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveTab(tab.id as ActiveTab);
+                            setIsMoreMenuOpen(false);
+                          }}
+                          className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm font-medium ${
+                            activeTab === tab.id
+                              ? 'bg-emerald-50 text-emerald-800'
+                              : 'text-gray-700 hover:bg-gray-50'
+                          }`}
+                        >
+                          <Icon className="h-4 w-4" />
+                          <span>{tab.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
+            )}
+          </div>
+
+          <div className="ml-auto flex items-center gap-1 sm:gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('orders');
+                setNewOrderSignal((value) => value + 1);
+              }}
+              className="hidden h-10 items-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 min-[1180px]:flex"
+            >
+              <Plus className="h-4 w-4" />
+              <span>New sale</span>
+            </button>
+            <NotificationCenter products={products} />
+            <div className="hidden items-center gap-3 border-l border-gray-200 pl-3 min-[1180px]:flex">
+              <div className="max-w-36 text-right leading-tight">
+                <p className="truncate text-sm font-medium text-gray-900">{user?.firstName} {user?.lastName}</p>
+                <p className="text-xs capitalize text-gray-500">{user?.role}</p>
+              </div>
+              <button
+                type="button"
+                onClick={logout}
+                className="flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+                title="Log out"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
             </div>
-            
-            {/* Main Navigation */}
-            <div className="hidden md:flex items-center space-x-1">
-              {visibleMainTabs.map((tab) => {
+            <button
+              type="button"
+              onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
+              className="flex h-10 w-10 items-center justify-center rounded-md text-gray-600 hover:bg-gray-100 min-[1180px]:hidden"
+              title="Open menu"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+
+        {isMoreMenuOpen && (
+          <div className="fixed inset-x-0 top-16 z-50 border-b border-gray-200 bg-white p-3 shadow-xl min-[1180px]:hidden">
+            <div className="mx-auto grid max-h-[calc(100vh-5rem)] grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3">
+              {[...visibleMainTabs, ...visibleSecondaryTabs].map((tab) => {
                 const Icon = tab.icon;
                 return (
                   <button
                     key={tab.id}
-                    onClick={() => setActiveTab(tab.id as ActiveTab)}
-                    className={`px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors ${
-                      activeTab === tab.id
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                    type="button"
+                    onClick={() => {
+                      setActiveTab(tab.id as ActiveTab);
+                      setIsMoreMenuOpen(false);
+                    }}
+                    className={`flex min-h-12 items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium ${
+                      activeTab === tab.id ? 'bg-gray-950 text-white' : 'bg-gray-50 text-gray-700'
                     }`}
                   >
-                    <Icon className="w-4 h-4" />
+                    <Icon className="h-4 w-4 shrink-0" />
                     <span>{tab.label}</span>
                   </button>
                 );
               })}
-
-              {/* More Menu */}
-              {visibleSecondaryTabs.length > 0 && (
-                <div className="relative">
-                  <button
-                    onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
-                    className={`px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors ${
-                      isMoreMenuOpen
-                        ? 'bg-gray-100 text-gray-900'
-                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                    }`}
-                  >
-                    <Menu className="w-4 h-4" />
-                    <span>More</span>
-                  </button>
-
-                  {isMoreMenuOpen && (
-                    <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
-                      {visibleSecondaryTabs.map((tab) => {
-                        const Icon = tab.icon;
-                        return (
-                          <button
-                            key={tab.id}
-                            onClick={() => {
-                              setActiveTab(tab.id as ActiveTab);
-                              setIsMoreMenuOpen(false);
-                            }}
-                            className={`w-full px-4 py-2 flex items-center space-x-2 transition-colors ${
-                              activeTab === tab.id
-                                ? 'bg-blue-50 text-blue-700'
-                                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                            }`}
-                          >
-                            <Icon className="w-4 h-4" />
-                            <span>{tab.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Mobile Menu Button */}
-            <div className="relative md:hidden">
               <button
-                onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
-                className="p-2 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+                type="button"
+                onClick={logout}
+                className="flex min-h-12 items-center gap-2 rounded-md bg-red-50 px-3 py-2 text-left text-sm font-medium text-red-700"
               >
-                <Menu className="w-6 h-6" />
+                <LogOut className="h-4 w-4" />
+                <span>Log out</span>
               </button>
-
-              {isMoreMenuOpen && (
-                <div className="absolute top-16 left-0 right-0 bg-white border-b border-gray-200 p-4 space-y-2 z-50">
-                  {[...visibleMainTabs, ...visibleSecondaryTabs].map((tab) => {
-                    const Icon = tab.icon;
-                    return (
-                      <button
-                        key={tab.id}
-                        onClick={() => {
-                          setActiveTab(tab.id as ActiveTab);
-                          setIsMoreMenuOpen(false);
-                        }}
-                        className={`w-full px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors ${
-                          activeTab === tab.id
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                        }`}
-                      >
-                        <Icon className="w-4 h-4" />
-                        <span>{tab.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Right Side - User & Notifications */}
-            <div className="flex items-center space-x-4">
-              <NotificationCenter products={products} />
-              
-              <div className="hidden sm:flex items-center space-x-3 border-l border-gray-200 pl-4">
-                <div className="text-right">
-                  <p className="text-sm font-medium text-gray-900">{user?.firstName} {user?.lastName}</p>
-                  <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
-                </div>
-                <button
-                  onClick={logout}
-                  className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-                  title="Logout"
-                >
-                  <LogOut className="w-5 h-5" />
-                </button>
-              </div>
             </div>
           </div>
-        </div>
+        )}
       </nav>
 
       {/* Error Display */}
@@ -608,9 +625,13 @@ function AppContent() {
         </div>
       )}
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="mx-auto max-w-screen-2xl px-4 py-5 pb-28 sm:px-6 sm:py-7 lg:px-8 min-[1180px]:pb-8">
         {activeTab === 'dashboard' && hasPermission('view_dashboard') && (
-          <Dashboard 
+          <Dashboard
+            products={products}
+            movements={movements}
+            orders={orders}
+            loading={loading}
             onCreatePurchaseOrder={(productId) => {
               const product = products.find(p => p.id === productId);
               if (product) {
@@ -618,7 +639,10 @@ function AppContent() {
               }
             }}
             onAddProduct={handleAddProduct}
-            onCreateOrder={() => setActiveTab('orders')}
+            onCreateOrder={() => {
+              setActiveTab('orders');
+              setNewOrderSignal((value) => value + 1);
+            }}
             onStockCount={() => {
               // For now, navigate to movements where stock count would typically be done
               setActiveTab('movements');
@@ -697,6 +721,8 @@ function AppContent() {
           <OrderManagement
             orders={orders}
             products={products}
+            openNewOrderSignal={newOrderSignal}
+            onNewOrderOpened={() => setNewOrderSignal(0)}
             onAddOrder={handleAddOrder}
             onUpdateOrder={handleUpdateOrder}
             onDeleteOrder={handleDeleteOrder}
@@ -745,7 +771,55 @@ function AppContent() {
         )}
       </main>
 
-
+      <nav aria-label="Mobile navigation" className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur min-[1180px]:hidden">
+        <div className="mx-auto grid max-w-lg grid-cols-5 items-end gap-1">
+          {visibleMainTabs.filter((tab) => ['dashboard', 'products'].includes(tab.id)).map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id as ActiveTab)}
+                className={`flex h-[3.25rem] flex-col items-center justify-center gap-1 rounded-md py-1 text-[11px] font-medium ${
+                  activeTab === tab.id ? 'text-emerald-700' : 'text-gray-500'
+                }`}
+              >
+                <Icon className="h-5 w-5" />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('orders');
+              setNewOrderSignal((value) => value + 1);
+            }}
+            className="flex h-14 flex-col items-center justify-center gap-0.5 rounded-md bg-emerald-600 text-[11px] font-semibold text-white shadow-sm"
+          >
+            <Plus className="h-5 w-5" />
+            <span>New sale</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('orders')}
+            className={`flex h-[3.25rem] flex-col items-center justify-center gap-1 rounded-md py-1 text-[11px] font-medium ${
+              activeTab === 'orders' ? 'text-emerald-700' : 'text-gray-500'
+            }`}
+          >
+            <ShoppingCart className="h-5 w-5" />
+            <span>Sales</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsMoreMenuOpen(true)}
+            className="flex h-[3.25rem] flex-col items-center justify-center gap-1 rounded-md py-1 text-[11px] font-medium text-gray-500"
+          >
+            <Menu className="h-5 w-5" />
+            <span>More</span>
+          </button>
+        </div>
+      </nav>
 
       <ProductDetail
         product={viewingProduct}
