@@ -31,7 +31,7 @@ interface OrderManagementProps {
   openNewOrderSignal?: number;
   onNewOrderOpened?: () => void;
   onAddOrder: (order: Order) => Order | void | Promise<Order | void>;
-  onUpdateOrder: (order: Order) => void | Promise<void>;
+  onUpdateOrder: (order: Order, options?: { syncItems?: boolean }) => void | Promise<void>;
   onDeleteOrder: (id: string) => void;
   onUpdateProduct: (product: Product) => void;
 }
@@ -246,7 +246,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({
           products={products}
           onSave={async (order) => {
             if (editingOrder) {
-              await onUpdateOrder(order);
+              await onUpdateOrder(order, { syncItems: true });
               return order;
             }
             return await onAddOrder(order);

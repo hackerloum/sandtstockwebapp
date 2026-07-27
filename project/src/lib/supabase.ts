@@ -1136,6 +1136,193 @@ export const updateOrder = async (orderId: string, orderUpdate: Partial<Database
   return data;
 };
 
+export const updateOrderWithItems = async (
+  orderId: string,
+  orderUpdate: Partial<Database['public']['Tables']['orders']['Update']>,
+  items: Omit<Database['public']['Tables']['order_items']['Insert'], 'id' | 'order_id'>[]
+) => {
+  if (items.length === 0) {
+    throw new Error('Add at least one product before saving the sale.');
+  }
+
+  const client = createServiceRoleClient();
+  const [
+    { data: existingOrder, error: orderReadError },
+    { data: existingItems, error: itemsReadError }
+  ] = await Promise.all([
+    client.from('orders').select('*').eq('id', orderId).single(),
+    client
+      .from('order_items')
+      .select('product_id, batch_id, quantity, unit_price, total_price')
+      .eq('order_id', orderId)
+  ]);
+
+  if (orderReadError) throw orderReadError;
+  if (itemsReadError) throw itemsReadError;
+
+  const { data: existingMovements, error: movementsReadError } = await client
+    .from('stock_movements')
+    .select('product_id, movement_type, quantity')
+    .eq('reference_number', existingOrder.order_number)
+    .like('reason', 'Sale%');
+
+  if (movementsReadError) throw movementsReadError;
+
+  const desiredByProduct = new Map<string, number>();
+  for (const item of items) {
+    const quantity = Math.floor(Number(item.quantity));
+    if (!item.product_id || !Number.isFinite(quantity) || quantity <= 0) {
+      throw new Error('Every sale item must have a product and a quantity greater than zero.');
+    }
+    desiredByProduct.set(item.product_id, (desiredByProduct.get(item.product_id) || 0) + quantity);
+  }
+
+  const appliedByProduct = new Map<string, number>();
+  for (const movement of existingMovements || []) {
+    if (!movement.product_id) continue;
+    const direction = movement.movement_type === 'out' ? 1 : -1;
+    appliedByProduct.set(
+      movement.product_id,
+      (appliedByProduct.get(movement.product_id) || 0) + (direction * Number(movement.quantity || 0))
+    );
+  }
+
+  const affectedProductIds = [...new Set([
+    ...desiredByProduct.keys(),
+    ...appliedByProduct.keys()
+  ])];
+  const deltas = affectedProductIds
+    .map((productId) => ({
+      productId,
+      quantity: (desiredByProduct.get(productId) || 0) - (appliedByProduct.get(productId) || 0)
+    }))
+    .filter((delta) => delta.quantity !== 0);
+
+  const { data: stockRows, error: stockError } = await client
+    .from('products')
+    .select('id, commercial_name, current_stock')
+    .in('id', affectedProductIds);
+
+  if (stockError) throw stockError;
+
+  for (const delta of deltas) {
+    if (delta.quantity <= 0) continue;
+    const product = stockRows?.find((row) => row.id === delta.productId);
+    const available = Number(product?.current_stock || 0);
+    if (!product) {
+      throw new Error('One of the selected products no longer exists. Refresh and try again.');
+    }
+    if (delta.quantity > available) {
+      throw new Error(`${product.commercial_name} has only ${available} units available.`);
+    }
+  }
+
+  const replacementItems = items.map((item) => ({
+    product_id: item.product_id,
+    batch_id: item.batch_id ?? null,
+    quantity: item.quantity,
+    unit_price: item.unit_price,
+    total_price: item.total_price,
+    order_id: orderId
+  }));
+  const originalOrderUpdate = {
+    customer_name: existingOrder.customer_name,
+    customer_email: existingOrder.customer_email,
+    customer_phone: existingOrder.customer_phone,
+    order_type: existingOrder.order_type,
+    pickup_by_staff: existingOrder.pickup_by_staff,
+    pickup_person_name: existingOrder.pickup_person_name,
+    pickup_person_phone: existingOrder.pickup_person_phone,
+    status: existingOrder.status,
+    total_amount: existingOrder.total_amount,
+    notes: existingOrder.notes,
+    created_by: existingOrder.created_by,
+    updated_at: existingOrder.updated_at
+  };
+  const originalItems = (existingItems || []).map((item) => ({
+    product_id: item.product_id,
+    batch_id: item.batch_id,
+    quantity: item.quantity,
+    unit_price: item.unit_price,
+    total_price: item.total_price,
+    order_id: orderId
+  }));
+
+  const restoreOriginalOrder = async () => {
+    await client.from('order_items').delete().eq('order_id', orderId);
+    if (originalItems.length > 0) {
+      await client.from('order_items').insert(originalItems);
+    }
+    await client.from('orders').update(originalOrderUpdate).eq('id', orderId);
+  };
+
+  const { data: updatedOrder, error: orderUpdateError } = await client
+    .from('orders')
+    .update(orderUpdate)
+    .eq('id', orderId)
+    .select()
+    .single();
+
+  if (orderUpdateError) throw orderUpdateError;
+
+  const { error: deleteItemsError } = await client
+    .from('order_items')
+    .delete()
+    .eq('order_id', orderId);
+
+  if (deleteItemsError) {
+    await restoreOriginalOrder();
+    throw deleteItemsError;
+  }
+
+  const { error: insertItemsError } = await client
+    .from('order_items')
+    .insert(replacementItems);
+
+  if (insertItemsError) {
+    await restoreOriginalOrder();
+    throw insertItemsError;
+  }
+
+  if (deltas.length > 0) {
+    const performedAt = new Date().toISOString();
+    const adjustmentMovements = deltas.map((delta) => ({
+      product_id: delta.productId,
+      batch_id: null,
+      movement_type: delta.quantity > 0 ? 'out' as const : 'in' as const,
+      quantity: Math.abs(delta.quantity),
+      reason: delta.quantity > 0
+        ? `Sale adjustment ${existingOrder.order_number}`
+        : `Sale edit return ${existingOrder.order_number}`,
+      reference_number: existingOrder.order_number,
+      notes: orderUpdate.notes ?? existingOrder.notes,
+      performed_by: existingOrder.created_by,
+      performed_at: performedAt
+    }));
+    const { error: movementError } = await client
+      .from('stock_movements')
+      .insert(adjustmentMovements);
+
+    if (movementError) {
+      await restoreOriginalOrder();
+      throw movementError;
+    }
+  }
+
+  const { data: updatedProducts, error: productRefreshError } = affectedProductIds.length > 0
+    ? await client.from('products').select('*').in('id', affectedProductIds)
+    : { data: [], error: null };
+
+  if (productRefreshError) {
+    console.error('Sale updated but refreshed stock could not be loaded:', productRefreshError);
+  }
+
+  return {
+    order: updatedOrder,
+    products: updatedProducts || []
+  };
+};
+
 export const createPurchaseOrder = async (
   po: Omit<Database['public']['Tables']['purchase_orders']['Insert'], 'id'>,
   items: Omit<Database['public']['Tables']['purchase_order_items']['Insert'], 'id' | 'po_id'>[]

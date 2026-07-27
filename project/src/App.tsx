@@ -35,6 +35,7 @@ import {
   createOrder,
   getErrorMessage,
   updateOrder,
+  updateOrderWithItems,
   createPurchaseOrder,
   ensureArgevilleSupplier,
   testProductVisibility
@@ -322,12 +323,10 @@ function AppContent() {
     }
   };
 
-  const handleUpdateOrder = async (order: Order) => {
+  const handleUpdateOrder = async (order: Order, options?: { syncItems?: boolean }) => {
     try {
       console.log('Updating order:', order.id, 'with new status:', order.status);
-      
-      // Update the order in the database
-      const updatedOrder = await updateOrder(order.id, {
+      const orderUpdate = {
         status: order.status,
         customer_name: order.customer_name,
         customer_email: order.customer_email,
@@ -336,15 +335,31 @@ function AppContent() {
         total_amount: order.total_amount,
         notes: order.notes,
         updated_at: new Date().toISOString()
-      });
-      
-      // Update the local state with the database response
-      setOrders(prev => prev.map(o => o.id === order.id ? { ...order, ...updatedOrder } : o));
+      };
+
+      if (options?.syncItems) {
+        const result = await updateOrderWithItems(order.id, orderUpdate, order.items || []);
+        setOrders(prev => prev.map((current) => current.id === order.id
+          ? { ...order, ...result.order, items: order.items || [] }
+          : current));
+        if (result.products.length > 0) {
+          const updatedById = new Map(result.products.map((product) => [product.id, product]));
+          setProducts(prev => prev.map((product) => {
+            const updated = updatedById.get(product.id);
+            return updated ? { ...product, ...updated } as Product : product;
+          }));
+        }
+      } else {
+        const updatedOrder = await updateOrder(order.id, orderUpdate);
+        setOrders(prev => prev.map(o => o.id === order.id ? { ...order, ...updatedOrder } : o));
+      }
       
       console.log('Order updated successfully');
     } catch (err) {
       console.error('Error updating order:', err);
-      setError(err instanceof Error ? err.message : 'Failed to update order');
+      const message = getErrorMessage(err) || 'Failed to update order';
+      setError(message);
+      throw new Error(message);
     }
   };
 
