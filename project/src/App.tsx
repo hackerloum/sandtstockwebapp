@@ -300,6 +300,20 @@ function AppContent() {
       const newOrder = await createOrder(orderInsert, items);
       const savedOrder = { ...newOrder, items } as Order;
       setOrders(prev => [...prev, savedOrder]);
+      const soldByProduct = new Map<string, number>();
+      items.forEach((item) => {
+        soldByProduct.set(item.product_id, (soldByProduct.get(item.product_id) || 0) + item.quantity);
+      });
+      setProducts(prev => prev.map((product) => {
+        const sold = soldByProduct.get(product.id) || 0;
+        return sold > 0
+          ? {
+              ...product,
+              current_stock: Math.max(0, Number(product.current_stock) - sold),
+              updated_at: new Date().toISOString()
+            }
+          : product;
+      }));
       return savedOrder;
     } catch (err) {
       const message = getErrorMessage(err) || 'Failed to create order';

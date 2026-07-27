@@ -993,6 +993,37 @@ export const createOrder = async (
   // App users authenticate through the app role system, not Supabase Auth. Use the
   // existing privileged data client so order and line-item RLS policies do not reject them.
   const client = createServiceRoleClient();
+  const requiredStock = new Map<string, number>();
+
+  for (const item of items) {
+    const quantity = Math.floor(Number(item.quantity));
+    if (!item.product_id || !Number.isFinite(quantity) || quantity <= 0) {
+      throw new Error('Every sale item must have a product and a quantity greater than zero.');
+    }
+    requiredStock.set(item.product_id, (requiredStock.get(item.product_id) || 0) + quantity);
+  }
+
+  const productIds = [...requiredStock.keys()];
+  const { data: stockRows, error: stockError } = await client
+    .from('products')
+    .select('id, commercial_name, current_stock')
+    .in('id', productIds);
+
+  if (stockError) throw stockError;
+
+  for (const productId of productIds) {
+    const product = stockRows?.find((row) => row.id === productId);
+    const requested = requiredStock.get(productId) || 0;
+    const available = Number(product?.current_stock || 0);
+
+    if (!product) {
+      throw new Error('One of the selected products no longer exists. Refresh and try again.');
+    }
+    if (requested > available) {
+      throw new Error(`${product.commercial_name} has only ${available} units available.`);
+    }
+  }
+
   const { data: orderData, error: orderError } = await client
     .from('orders')
     .insert(order)
@@ -1010,20 +1041,50 @@ export const createOrder = async (
     order_id: orderData.id
   }));
 
+  const cleanupOrder = async () => {
+    const { error: itemCleanupError } = await client
+      .from('order_items')
+      .delete()
+      .eq('order_id', orderData.id);
+    const { error: orderCleanupError } = await client
+      .from('orders')
+      .delete()
+      .eq('id', orderData.id);
+
+    if (itemCleanupError || orderCleanupError) {
+      console.error('Could not fully clean up failed sale:', itemCleanupError || orderCleanupError);
+    }
+  };
+
   const { error: itemsError } = await client
     .from('order_items')
     .insert(orderItems);
 
   if (itemsError) {
-    const { error: cleanupError } = await client
-      .from('orders')
-      .delete()
-      .eq('id', orderData.id);
-
-    if (cleanupError) {
-      console.error('Could not clean up order after line-item failure:', cleanupError);
-    }
+    await cleanupOrder();
     throw itemsError;
+  }
+
+  const performedAt = new Date().toISOString();
+  const stockMovements = orderItems.map((item) => ({
+    product_id: item.product_id,
+    batch_id: item.batch_id,
+    movement_type: 'out' as const,
+    quantity: item.quantity,
+    reason: `Sale ${order.order_number}`,
+    reference_number: order.order_number,
+    notes: order.notes,
+    performed_by: order.created_by,
+    performed_at: performedAt
+  }));
+
+  const { error: movementError } = await client
+    .from('stock_movements')
+    .insert(stockMovements);
+
+  if (movementError) {
+    await cleanupOrder();
+    throw movementError;
   }
 
   return orderData;
