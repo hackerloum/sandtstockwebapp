@@ -1451,6 +1451,181 @@ const normalizeMoneyFields = <T extends Record<string, unknown>>(
   return normalized;
 };
 
+export type DailyClosingInput = {
+  date: string;
+  storeToShopSales: number;
+  cashOnHand: number;
+  bankDeposit: number;
+  pettyCash: number;
+  difference: number;
+  notes: string | null;
+};
+
+export type ExpenseInput = {
+  title: string;
+  description: string | null;
+  amount: number;
+  type: Database['public']['Tables']['expenses']['Row']['type'];
+  date: string;
+};
+
+const getClosingActorId = async (
+  client: ReturnType<typeof createServiceRoleClient>
+): Promise<string> => {
+  const { data: admin } = await client
+    .from('user_profiles')
+    .select('id')
+    .eq('role', 'admin')
+    .limit(1)
+    .maybeSingle();
+
+  if (admin?.id) return admin.id;
+
+  const { data: accountant, error } = await client
+    .from('user_profiles')
+    .select('id')
+    .eq('role', 'accountant')
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!accountant?.id) throw new Error('No admin or accountant profile is available for financial records.');
+  return accountant.id;
+};
+
+const getClosingDateRange = (date: string) => {
+  const start = new Date(`${date}T00:00:00+03:00`);
+  const next = new Date(start.getTime() + (24 * 60 * 60 * 1000));
+  return { start: start.toISOString(), next: next.toISOString() };
+};
+
+export const getDailyClosingWorkspace = async (
+  date: string
+): Promise<{ closing: DailyClosing | null; expenses: Expense[] }> => {
+  const client = createServiceRoleClient();
+  const range = getClosingDateRange(date);
+  const [
+    { data: closing, error: closingError },
+    { data: expenses, error: expensesError }
+  ] = await Promise.all([
+    client
+      .from('daily_closings')
+      .select('*')
+      .eq('date', date)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    client
+      .from('expenses')
+      .select('*')
+      .gte('date', range.start)
+      .lt('date', range.next)
+      .order('date', { ascending: false })
+  ]);
+
+  if (closingError) throw closingError;
+  if (expensesError) throw expensesError;
+
+  return {
+    closing: closing
+      ? normalizeMoneyFields(closing, [
+          'cash_on_hand',
+          'bank_deposit',
+          'petty_cash',
+          'box_product_sales',
+          'oil_sales',
+          'cash_on_hand_box',
+          'cash_on_hand_oil',
+          'cash_on_hand_perfume'
+        ]) as DailyClosing
+      : null,
+    expenses: (expenses || []).map((expense) =>
+      normalizeMoneyFields(expense, ['amount'])
+    ) as Expense[]
+  };
+};
+
+export const saveDailyClosing = async (input: DailyClosingInput): Promise<DailyClosing> => {
+  const client = createServiceRoleClient();
+  const actorId = await getClosingActorId(client);
+  const now = new Date().toISOString();
+  const isReconciled = Math.abs(input.difference) < 0.5;
+  const payload: Database['public']['Tables']['daily_closings']['Insert'] = {
+    date: input.date,
+    cash_on_hand: input.cashOnHand,
+    bank_deposit: input.bankDeposit,
+    petty_cash: input.pettyCash,
+    notes: input.notes,
+    closed_by: actorId,
+    closed_at: now,
+    is_reconciled: isReconciled,
+    reconciled_at: isReconciled ? now : null,
+    reconciled_by: isReconciled ? actorId : null,
+    box_product_sales: input.storeToShopSales,
+    oil_sales: 0,
+    cash_on_hand_box: 0,
+    cash_on_hand_oil: 0,
+    cash_on_hand_perfume: input.cashOnHand
+  };
+
+  const { data: existing, error: existingError } = await client
+    .from('daily_closings')
+    .select('id')
+    .eq('date', input.date)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingError) throw existingError;
+
+  const query = existing?.id
+    ? client.from('daily_closings').update(payload).eq('id', existing.id)
+    : client.from('daily_closings').insert(payload);
+  const { data, error } = await query.select().single();
+
+  if (error) throw error;
+  return normalizeMoneyFields(data, [
+    'cash_on_hand',
+    'bank_deposit',
+    'petty_cash',
+    'box_product_sales',
+    'oil_sales',
+    'cash_on_hand_box',
+    'cash_on_hand_oil',
+    'cash_on_hand_perfume'
+  ]) as DailyClosing;
+};
+
+export const createExpense = async (input: ExpenseInput): Promise<Expense> => {
+  const client = createServiceRoleClient();
+  const actorId = await getClosingActorId(client);
+  const now = new Date().toISOString();
+  const payload: Database['public']['Tables']['expenses']['Insert'] = {
+    title: input.title,
+    description: input.description,
+    amount: input.amount,
+    type: input.type,
+    created_by: actorId,
+    date: new Date(`${input.date}T12:00:00+03:00`).toISOString(),
+    receipt_url: null,
+    is_approved: true,
+    approved_by: actorId,
+    approved_at: now,
+    is_payroll: false,
+    payroll_lines: []
+  };
+  const { data, error } = await client.from('expenses').insert(payload).select().single();
+
+  if (error) throw error;
+  return normalizeMoneyFields(data, ['amount']) as Expense;
+};
+
+export const deleteExpense = async (id: string): Promise<void> => {
+  const client = createServiceRoleClient();
+  const { error } = await client.from('expenses').delete().eq('id', id);
+  if (error) throw error;
+};
+
 type ReportQueryResult = {
   data: Record<string, unknown>[] | null;
   error: unknown;

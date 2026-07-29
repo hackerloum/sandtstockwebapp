@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { BarChart3, Package, ArrowUpDown, Home, Plus, ShoppingCart, FileText, Activity, LogOut, Menu, AlertCircle, X, CheckCircle, Zap, CalendarDays, MoreHorizontal } from 'lucide-react';
+import { BarChart3, Package, ArrowUpDown, Home, Plus, ShoppingCart, FileText, Activity, LogOut, Menu, AlertCircle, X, CheckCircle, Zap, CalendarDays, MoreHorizontal, WalletCards } from 'lucide-react';
 import { Product, StockMovement, Order, PurchaseOrder, PurchaseOrderItem, Brand, Supplier, ActivityLog } from './types';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
@@ -15,6 +15,7 @@ import { OrderManagement } from './components/OrderManagement';
 import { PurchaseOrders } from './components/PurchaseOrders';
 import { AdvancedReports } from './components/AdvancedReports';
 import { MonthlyReportsPage } from './components/MonthlyReportsPage';
+import { DailyClosingPage } from './components/DailyClosingPage';
 import { NotificationCenter } from './components/NotificationCenter';
 import { ActivityLogComponent } from './components/ActivityLog';
 import { ProductReports } from './components/ProductReports';
@@ -51,6 +52,7 @@ type ActiveTab =
   | 'purchase-orders'
   | 'reports'
   | 'monthly-reports'
+  | 'daily-closing'
   | 'product-reports'
   | 'activity'
   | 'reorder-engine'
@@ -403,6 +405,7 @@ function AppContent() {
     { id: 'dashboard', label: 'Dashboard', icon: Home, permission: 'view_dashboard' },
     { id: 'products', label: 'Products', icon: Package, permission: 'view_products' },
     { id: 'orders', label: 'Sales', icon: ShoppingCart, permission: 'view_orders' },
+    { id: 'daily-closing', label: 'Daily closing', icon: WalletCards, permission: 'view_reports' },
     { id: 'purchase-orders', label: 'Purchasing', icon: FileText, permission: 'view_purchase_orders' },
   ];
 
@@ -811,6 +814,10 @@ function AppContent() {
             orders={orders}
             products={products}
           />
+        )}
+
+        {activeTab === 'daily-closing' && hasPermission('view_reports') && (
+          <DailyClosingPage orders={orders} />
         )}
 
         {activeTab === 'product-reports' && hasPermission('view_reports') && (

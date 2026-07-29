@@ -182,7 +182,7 @@ export interface Database {
       user_profiles: {
         Row: {
           id: string
-          role: 'admin' | 'manager' | 'staff'
+          role: 'admin' | 'manager' | 'staff' | 'accountant'
           first_name: string | null
           last_name: string | null
           avatar_url: string | null
@@ -205,12 +205,57 @@ export interface Database {
       }
       role_permissions: {
         Row: {
-          role: 'admin' | 'manager' | 'staff'
+          role: 'admin' | 'manager' | 'staff' | 'accountant'
           permission: string
           created_at: string
         }
         Insert: Omit<Database['public']['Tables']['role_permissions']['Row'], 'created_at'>
         Update: Partial<Database['public']['Tables']['role_permissions']['Insert']>
+      }
+      daily_closings: {
+        Row: {
+          id: string
+          date: string
+          cash_on_hand: number
+          bank_deposit: number
+          petty_cash: number
+          notes: string | null
+          closed_by: string
+          closed_at: string
+          is_reconciled: boolean
+          reconciled_at: string | null
+          reconciled_by: string | null
+          created_at: string | null
+          updated_at: string | null
+          box_product_sales: number
+          oil_sales: number
+          cash_on_hand_box: number
+          cash_on_hand_oil: number
+          cash_on_hand_perfume: number
+        }
+        Insert: Omit<Database['public']['Tables']['daily_closings']['Row'], 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Database['public']['Tables']['daily_closings']['Insert']>
+      }
+      expenses: {
+        Row: {
+          id: string
+          title: string
+          description: string | null
+          amount: number
+          type: 'staff' | 'operational' | 'utilities' | 'supplies' | 'other'
+          created_by: string
+          date: string
+          created_at: string | null
+          updated_at: string | null
+          receipt_url: string | null
+          is_approved: boolean | null
+          approved_by: string | null
+          approved_at: string | null
+          is_payroll: boolean
+          payroll_lines: Json
+        }
+        Insert: Omit<Database['public']['Tables']['expenses']['Row'], 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Database['public']['Tables']['expenses']['Insert']>
       }
     }
   }

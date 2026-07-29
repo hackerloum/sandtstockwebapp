@@ -304,7 +304,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ order, products, onSave, onSaved,
   const [customerName, setCustomerName] = useState(order?.customer_name || 'Walk-in customer');
   const [customerPhone, setCustomerPhone] = useState(order?.customer_phone || '');
   const [customerEmail, setCustomerEmail] = useState(order?.customer_email || '');
-  const [orderType, setOrderType] = useState(normalizeOrderDestination(order?.order_type));
+  const [orderType, setOrderType] = useState(
+    order ? normalizeOrderDestination(order.order_type) : 'store_to_shop'
+  );
   const [notes, setNotes] = useState(order?.notes || '');
   const [orderItems, setOrderItems] = useState<OrderItem[]>(initialItems);
   const [productQuery, setProductQuery] = useState('');
