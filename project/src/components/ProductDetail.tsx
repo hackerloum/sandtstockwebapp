@@ -1,6 +1,6 @@
 import React from 'react';
 import { CalendarDays, Edit2, Package, Truck, Weight } from 'lucide-react';
-import { Product } from '../types';
+import { InventoryOwner, Product } from '../types';
 import { formatCurrency, getStockStatus, getStatusText } from '../utils/stockUtils';
 import { Button } from './shared/Button';
 import { Modal } from './shared/Modal';
@@ -10,6 +10,7 @@ interface ProductDetailProps {
   isOpen: boolean;
   onClose: () => void;
   onEdit?: (product: Product) => void;
+  inventoryOwners: InventoryOwner[];
 }
 
 interface ExtendedProduct extends Product {
@@ -42,7 +43,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   product,
   isOpen,
   onClose,
-  onEdit
+  onEdit,
+  inventoryOwners
 }) => {
   if (!product) return null;
 
@@ -54,6 +56,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const stockValue = stock * Number(product.price || 0);
   const stockPercent = maximum > 0 ? Math.min(Math.max((stock / maximum) * 100, 0), 100) : 0;
   const season = Array.isArray(product.season) && product.season.length ? product.season.join(', ') : 'Not set';
+  const ownerStocks = (product.owner_stocks || []).filter((stock) => Number(stock.quantity || 0) > 0);
+  const defaultOwner = inventoryOwners.find((owner) => owner.is_default) || inventoryOwners[0] || null;
 
   const handleEdit = () => {
     onClose();
@@ -107,6 +111,32 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             <p className="mt-1 truncate text-base font-semibold text-gray-950" title={formatCurrency(stockValue)}>
               {formatCurrency(stockValue)}
             </p>
+          </div>
+        </section>
+
+        <section className="rounded-md border border-gray-200 bg-white p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-gray-950">Owner stock</h3>
+            <p className="text-xs text-gray-500">Total stock is split below</p>
+          </div>
+          <div className="mt-3 divide-y divide-gray-100 rounded-md border border-gray-200">
+            {ownerStocks.length === 0 ? (
+              <div className="px-4 py-6 text-sm text-gray-500">
+                No owner split recorded yet. Default owner: {defaultOwner?.name || 'Company'}.
+              </div>
+            ) : ownerStocks.map((stock) => (
+              <div key={stock.owner_id} className="flex items-center justify-between gap-4 px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">
+                    {stock.owner?.name || inventoryOwners.find((owner) => owner.id === stock.owner_id)?.name || 'Owner'}
+                  </p>
+                  <p className="text-xs text-gray-500 capitalize">
+                    {stock.owner?.owner_type || inventoryOwners.find((owner) => owner.id === stock.owner_id)?.owner_type || 'person'}
+                  </p>
+                </div>
+                <p className="text-sm font-semibold text-gray-950">{stock.quantity}</p>
+              </div>
+            ))}
           </div>
         </section>
 

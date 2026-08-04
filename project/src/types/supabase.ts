@@ -37,6 +37,30 @@ export interface Database {
         Insert: Omit<Database['public']['Tables']['products']['Row'], 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Database['public']['Tables']['products']['Insert']>
       }
+      inventory_owners: {
+        Row: {
+          id: string
+          name: string
+          owner_type: 'company' | 'person'
+          is_default: boolean
+          is_active: boolean
+          notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: Omit<Database['public']['Tables']['inventory_owners']['Row'], 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Database['public']['Tables']['inventory_owners']['Insert']>
+      }
+      product_owner_stocks: {
+        Row: {
+          product_id: string
+          owner_id: string
+          quantity: number
+          updated_at: string
+        }
+        Insert: Database['public']['Tables']['product_owner_stocks']['Row']
+        Update: Partial<Database['public']['Tables']['product_owner_stocks']['Insert']>
+      }
       product_batches: {
         Row: {
           id: string
@@ -58,6 +82,7 @@ export interface Database {
           id: string
           product_id: string
           batch_id: string | null
+          owner_id: string | null
           movement_type: 'in' | 'out'
           quantity: number
           reason: string
@@ -96,6 +121,7 @@ export interface Database {
           order_id: string
           product_id: string
           batch_id: string | null
+          owner_id: string | null
           quantity: number
           unit_price: number
           total_price: number
@@ -127,6 +153,7 @@ export interface Database {
           id: string
           po_id: string
           product_id: string
+          owner_id: string | null
           quantity: number
           received_quantity: number
           unit_price: number

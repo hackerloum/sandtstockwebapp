@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { BarChart3, Package, ArrowUpDown, Home, Plus, ShoppingCart, FileText, Activity, LogOut, Menu, AlertCircle, X, CheckCircle, Zap, CalendarDays, MoreHorizontal, WalletCards } from 'lucide-react';
-import { Product, StockMovement, Order, PurchaseOrder, PurchaseOrderItem, Brand, Supplier, ActivityLog } from './types';
+import { Product, StockMovement, Order, PurchaseOrder, PurchaseOrderItem, Brand, Supplier, ActivityLog, InventoryOwner } from './types';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
 import { Dashboard } from './components/Dashboard';
@@ -38,6 +38,8 @@ import {
   updateOrder,
   updateOrderWithItems,
   createPurchaseOrder,
+  getInventoryOwners,
+  receivePurchaseOrderStock,
   ensureArgevilleSupplier,
   testProductVisibility
 } from './lib/supabase';
@@ -79,6 +81,7 @@ function AppContent() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [inventoryOwners, setInventoryOwners] = useState<InventoryOwner[]>([]);
   const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [incomingByProduct, setIncomingByProduct] = useState<
     Array<{
@@ -122,6 +125,7 @@ function AppContent() {
           incomingByProductData,
           brandsData,
           suppliersData,
+          inventoryOwnersData,
           activitiesData
         ] = await Promise.all([
           getProducts(),
@@ -131,6 +135,7 @@ function AppContent() {
           getIncomingByProductSummary().catch(() => []),
           getBrands(),
           getSuppliers(),
+          getInventoryOwners().catch(() => []),
           getActivityLog()
         ]);
         
@@ -141,6 +146,7 @@ function AppContent() {
         setIncomingByProduct(incomingByProductData);
         setBrands(brandsData);
         setSuppliers(suppliersData);
+        setInventoryOwners(inventoryOwnersData);
         setActivities(activitiesData);
         
 
@@ -282,6 +288,25 @@ function AppContent() {
     setProducts(prev => prev.map(p => p.id === product.id ? product : p));
   };
 
+  const applyOwnerStockChange = (product: Product, ownerId: string, quantityDelta: number): Product => {
+    const ownerStocks = [...(product.owner_stocks || [])];
+    const index = ownerStocks.findIndex((stock) => stock.owner_id === ownerId);
+    if (index >= 0) {
+      ownerStocks[index] = {
+        ...ownerStocks[index],
+        quantity: Math.max(0, Number(ownerStocks[index].quantity || 0) + quantityDelta)
+      };
+    } else if (quantityDelta > 0) {
+      ownerStocks.push({ product_id: product.id, owner_id: ownerId, quantity: quantityDelta });
+    }
+    return {
+      ...product,
+      current_stock: Math.max(0, ownerStocks.reduce((sum, stock) => sum + Number(stock.quantity || 0), 0)),
+      owner_stocks: ownerStocks,
+      updated_at: new Date().toISOString()
+    };
+  };
+
   const handleAddOrder = async (order: Order) => {
     try {
       const items = order.items || [];
@@ -304,18 +329,18 @@ function AppContent() {
       const savedOrder = { ...newOrder, items } as Order;
       setOrders(prev => [...prev, savedOrder]);
       const soldByProduct = new Map<string, number>();
+      const soldByOwner = new Map<string, Array<{ ownerId: string; quantity: number }>>();
       items.forEach((item) => {
         soldByProduct.set(item.product_id, (soldByProduct.get(item.product_id) || 0) + item.quantity);
+        const ownerId = item.owner_id || inventoryOwners.find((owner) => owner.is_default)?.id || '';
+        if (!soldByOwner.has(item.product_id)) soldByOwner.set(item.product_id, []);
+        soldByOwner.get(item.product_id)!.push({ ownerId, quantity: -item.quantity });
       });
       setProducts(prev => prev.map((product) => {
         const sold = soldByProduct.get(product.id) || 0;
-        return sold > 0
-          ? {
-              ...product,
-              current_stock: Math.max(0, Number(product.current_stock) - sold),
-              updated_at: new Date().toISOString()
-            }
-          : product;
+        if (sold <= 0) return product;
+        const ownerDeltas = soldByOwner.get(product.id) || [];
+        return ownerDeltas.reduce((current, delta) => applyOwnerStockChange(current, delta.ownerId, delta.quantity), product);
       }));
       return savedOrder;
     } catch (err) {
@@ -386,6 +411,13 @@ function AppContent() {
 
   const handleUpdatePurchaseOrder = (po: PurchaseOrder) => {
     setPurchaseOrders(prev => prev.map(p => p.id === po.id ? po : p));
+  };
+
+  const handleReceivePurchaseOrder = async (po: PurchaseOrder) => {
+    const result = await receivePurchaseOrderStock(po.id);
+    setPurchaseOrders(prev => prev.map((current) => current.id === po.id ? result.purchaseOrder : current));
+    const updated = new Map(result.products.map((product) => [product.id, product]));
+    setProducts(prev => prev.map((product) => updated.get(product.id) || product));
   };
 
   const handleDeletePurchaseOrder = (id: string) => {
@@ -750,6 +782,7 @@ function AppContent() {
             onBack={() => setActiveTab('products')}
             brands={brands}
             suppliers={suppliers}
+            inventoryOwners={inventoryOwners}
           />
         )}
 
@@ -759,6 +792,7 @@ function AppContent() {
             onSave={handleSaveProduct}
             brands={brands}
             suppliers={suppliers}
+            inventoryOwners={inventoryOwners}
             onBack={() => {
               setActiveTab('products');
               setEditingProduct(null);
@@ -779,6 +813,7 @@ function AppContent() {
           <OrderManagement
             orders={orders}
             products={products}
+            inventoryOwners={inventoryOwners}
             openNewOrderSignal={newOrderSignal}
             onNewOrderOpened={() => setNewOrderSignal(0)}
             onAddOrder={handleAddOrder}
@@ -795,8 +830,9 @@ function AppContent() {
             suppliers={suppliers}
             onAddPurchaseOrder={handleAddPurchaseOrder}
             onUpdatePurchaseOrder={handleUpdatePurchaseOrder}
+            onReceivePurchaseOrder={handleReceivePurchaseOrder}
             onDeletePurchaseOrder={handleDeletePurchaseOrder}
-            onUpdateProduct={handleUpdateProduct}
+            inventoryOwners={inventoryOwners}
           />
         )}
 
@@ -887,6 +923,7 @@ function AppContent() {
         product={viewingProduct}
         isOpen={isProductDetailOpen}
         onEdit={handleEditProduct}
+        inventoryOwners={inventoryOwners}
         onClose={() => {
           setIsProductDetailOpen(false);
           setViewingProduct(null);

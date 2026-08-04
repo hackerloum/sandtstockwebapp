@@ -5,9 +5,13 @@ import type {
   DailyClosing,
   Expense,
   IncomingByProductSummary,
+  InventoryOwner,
   MonthlyBalanceClosing,
   MonthlyReportData,
   PriceOverride,
+  Product,
+  ProductOwnerStock,
+  PurchaseOrder,
   UpcomingInvoice,
   UpcomingInvoiceLine,
   UpcomingInvoiceMatchStatus,
@@ -20,6 +24,142 @@ const supabaseServiceRoleKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
 const createServiceRoleClient = () => createClient<Database>(supabaseUrl, supabaseServiceRoleKey);
+
+const ownerSelect = 'id, name, owner_type, is_default, is_active';
+
+const getDefaultOwnerIdFromRows = (owners: InventoryOwner[]) =>
+  owners.find((owner) => owner.is_default)?.id || owners[0]?.id || null;
+
+const normalizeOwnerStocks = (rows: unknown[] | null | undefined): ProductOwnerStock[] =>
+  (rows || []).map((row) => {
+    const stock = row as Record<string, unknown>;
+    const embedded = Array.isArray(stock.owner) ? stock.owner[0] : stock.owner;
+    return {
+      product_id: String(stock.product_id || ''),
+      owner_id: String(stock.owner_id || ''),
+      quantity: Math.max(0, Math.floor(toMoneyNumber(stock.quantity, 0))),
+      updated_at: typeof stock.updated_at === 'string' ? stock.updated_at : undefined,
+      owner: embedded && typeof embedded === 'object'
+        ? embedded as ProductOwnerStock['owner']
+        : null
+    };
+  });
+
+const attachOwnerStocksToProducts = async <T extends { id: string; current_stock?: number | string }>(
+  products: T[] | null | undefined,
+  client = createServiceRoleClient()
+): Promise<Array<T & { owner_stocks?: ProductOwnerStock[] }>> => {
+  if (!products?.length) return [];
+
+  const productIds = products.map((product) => product.id).filter(Boolean);
+  const { data: ownerStocks, error } = await client
+    .from('product_owner_stocks')
+    .select(`product_id, owner_id, quantity, updated_at, owner:inventory_owners(${ownerSelect})`)
+    .in('product_id', productIds);
+
+  if (error) {
+    console.warn('Could not load owner stock balances:', error);
+    return products.map((product) => ({
+      ...product,
+      owner_stocks: []
+    }));
+  }
+
+  const byProduct = new Map<string, ProductOwnerStock[]>();
+  normalizeOwnerStocks(ownerStocks as unknown[]).forEach((stock) => {
+    if (!byProduct.has(stock.product_id)) byProduct.set(stock.product_id, []);
+    byProduct.get(stock.product_id)!.push(stock);
+  });
+
+  return products.map((product) => ({
+    ...product,
+    owner_stocks: byProduct.get(product.id) || []
+  }));
+};
+
+const getInventoryOwnersWithClient = async (
+  client = createServiceRoleClient()
+): Promise<InventoryOwner[]> => {
+  const { data, error } = await client
+    .from('inventory_owners')
+    .select('*')
+    .eq('is_active', true)
+    .order('is_default', { ascending: false })
+    .order('name');
+
+  if (error) throw error;
+  return (data || []) as InventoryOwner[];
+};
+
+const ensureDefaultInventoryOwner = async (
+  client = createServiceRoleClient()
+): Promise<InventoryOwner> => {
+  const owners = await getInventoryOwnersWithClient(client);
+  const existing = owners.find((owner) => owner.is_default) || owners[0];
+  if (existing) return existing;
+
+  const { data, error } = await client
+    .from('inventory_owners')
+    .insert({
+      name: 'Company',
+      owner_type: 'company',
+      is_default: true,
+      is_active: true,
+      notes: null
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data as InventoryOwner;
+};
+
+export const getInventoryOwners = async (): Promise<InventoryOwner[]> =>
+  getInventoryOwnersWithClient(createServiceRoleClient());
+
+const syncProductOwnerStocks = async (
+  productId: string,
+  ownerStocks: ProductOwnerStock[] | undefined,
+  client = createServiceRoleClient()
+) => {
+  if (!ownerStocks) return;
+
+  const defaultOwner = await ensureDefaultInventoryOwner(client);
+  const normalized = ownerStocks
+    .map((stock) => ({
+      product_id: productId,
+      owner_id: stock.owner_id || defaultOwner.id,
+      quantity: Math.max(0, Math.floor(Number(stock.quantity) || 0))
+    }))
+    .filter((stock) => stock.owner_id);
+
+  if (!normalized.some((stock) => stock.owner_id === defaultOwner.id)) {
+    normalized.push({ product_id: productId, owner_id: defaultOwner.id, quantity: 0 });
+  }
+
+  const { error: upsertError } = await client
+    .from('product_owner_stocks')
+    .upsert(normalized, { onConflict: 'product_id,owner_id' });
+
+  if (upsertError) throw upsertError;
+
+  const activeOwnerIds = normalized.map((stock) => stock.owner_id);
+  const { error: deleteError } = await client
+    .from('product_owner_stocks')
+    .delete()
+    .eq('product_id', productId)
+    .not('owner_id', 'in', `(${activeOwnerIds.join(',')})`);
+
+  if (deleteError) throw deleteError;
+
+  const total = normalized.reduce((sum, stock) => sum + stock.quantity, 0);
+  const { error: productStockError } = await client
+    .from('products')
+    .update({ current_stock: total, updated_at: new Date().toISOString() })
+    .eq('id', productId);
+
+  if (productStockError) throw productStockError;
+};
 
 /** Map joined order_items + product embed into app OrderItem (coerce decimals, name from join). */
 function mapOrderItemRowFromQuery(item: Record<string, unknown>) {
@@ -50,6 +190,13 @@ function mapOrderItemRowFromQuery(item: Record<string, unknown>) {
     id: item.id as string,
     product_id: String(item.product_id ?? ''),
     product_name: nameFromJoin || customName || 'Unknown Product',
+    owner_id: item.owner_id ? String(item.owner_id) : null,
+    owner_name: (() => {
+      const owner = Array.isArray(item.owner) ? item.owner[0] : item.owner;
+      return owner && typeof owner === 'object'
+        ? String((owner as Record<string, unknown>).name || '')
+        : null;
+    })(),
     quantity: qty,
     unit_price,
     total_price
@@ -230,11 +377,11 @@ export const getProducts = async () => {
         }
         
         // Return service role data instead of empty array
-        return serviceData || [];
+        return await attachOwnerStocksToProducts(serviceData as Product[], serviceRoleClient);
       }
     }
     
-    return data || [];
+    return await attachOwnerStocksToProducts(data as Product[]);
   } catch (error) {
     console.error('getProducts: Error in getProducts:', error);
     return [];
@@ -347,7 +494,8 @@ export const getStockMovements = async () => {
     .select(`
       *,
       product:products(code, commercial_name),
-      batch:product_batches(batch_number)
+      batch:product_batches(batch_number),
+      owner:inventory_owners(name, owner_type)
     `)
     .order('performed_at', { ascending: false });
   
@@ -479,6 +627,7 @@ export const getOrders = async () => {
             items:order_items(
               id,
               product_id,
+              owner_id,
               quantity,
               unit_price,
               total_price,
@@ -486,7 +635,8 @@ export const getOrders = async () => {
               custom_product_description,
               is_custom_product,
               original_unit_price,
-              product:products(code, commercial_name)
+              product:products(code, commercial_name),
+              owner:inventory_owners(name, owner_type)
             )
           `)
           .order('created_at', { ascending: false });
@@ -535,6 +685,7 @@ export const getOrders = async () => {
             items:order_items(
               id,
               product_id,
+              owner_id,
               quantity,
               unit_price,
               total_price,
@@ -542,7 +693,8 @@ export const getOrders = async () => {
               custom_product_description,
               is_custom_product,
               original_unit_price,
-              product:products(code, commercial_name)
+              product:products(code, commercial_name),
+              owner:inventory_owners(name, owner_type)
             )
           `)
           .order('created_at', { ascending: false });
@@ -581,6 +733,7 @@ export const getOrders = async () => {
         items:order_items(
           id,
           product_id,
+          owner_id,
           quantity,
           unit_price,
           total_price,
@@ -588,7 +741,8 @@ export const getOrders = async () => {
           custom_product_description,
           is_custom_product,
           original_unit_price,
-          product:products(code, commercial_name)
+          product:products(code, commercial_name),
+          owner:inventory_owners(name, owner_type)
         )
       `)
       .order('created_at', { ascending: false });
@@ -643,11 +797,13 @@ export const getPurchaseOrders = async () => {
       items:purchase_order_items(
         id,
         product_id,
+        owner_id,
         quantity,
         received_quantity,
         unit_price,
         total_price,
-        product:products(code, commercial_name)
+        product:products(code, commercial_name),
+        owner:inventory_owners(name, owner_type)
       )
     `)
     .order('created_at', { ascending: false });
@@ -662,6 +818,8 @@ export const getPurchaseOrders = async () => {
       id: item.id,
       product_id: item.product_id,
       product_name: item.product?.commercial_name || 'Unknown Product',
+      owner_id: item.owner_id || null,
+      owner_name: item.owner?.name || null,
       quantity: item.quantity,
       received_quantity: item.received_quantity || 0,
       unit_price: item.unit_price,
@@ -672,6 +830,12 @@ export const getPurchaseOrders = async () => {
 
 export const createProduct = async (product: any) => {
   console.log('createProduct called with:', product);
+  const ownerStocks = Array.isArray(product.owner_stocks)
+    ? product.owner_stocks as ProductOwnerStock[]
+    : undefined;
+  const ownerStockTotal = ownerStocks
+    ? ownerStocks.reduce((sum, stock) => sum + Math.max(0, Math.floor(Number(stock.quantity) || 0)), 0)
+    : null;
   
   // Handle supplier_id - if it's 'ARGEVILLE' string, get the actual UUID
   let supplierId = product.supplier_id;
@@ -721,7 +885,7 @@ export const createProduct = async (product: any) => {
     gross_weight: parseFloat(product.gross_weight) || 1.136,
     tare_weight: parseFloat(product.tare_weight) || 0.136,
     net_weight: parseFloat(product.net_weight) || 1.000,
-    current_stock: parseInt(product.current_stock) || 0,
+    current_stock: ownerStockTotal ?? (parseInt(product.current_stock) || 0),
     min_stock: parseInt(product.min_stock) || 5,
     max_stock: parseInt(product.max_stock) || 50,
     reorder_point: parseInt(product.reorder_point) || 10,
@@ -778,6 +942,7 @@ export const createProduct = async (product: any) => {
     }
     
     console.log('Product created successfully (service role):', insertedProduct);
+    await syncProductOwnerStocks(insertedProduct.id, ownerStocks, serviceRoleClient);
     
     // Verify the product was actually created by fetching it
     const { data: verifyProduct, error: verifyError } = await serviceRoleClient
@@ -792,7 +957,8 @@ export const createProduct = async (product: any) => {
       console.log('Product verified in database:', verifyProduct);
     }
     
-    return insertedProduct;
+    const [withOwnerStocks] = await attachOwnerStocksToProducts([insertedProduct as Product], serviceRoleClient);
+    return withOwnerStocks;
   } catch (serviceErr) {
     console.error('Service role client failed:', serviceErr);
     throw serviceErr;
@@ -801,6 +967,9 @@ export const createProduct = async (product: any) => {
 
 export const updateProduct = async (id: string, updates: Partial<Database['public']['Tables']['products']['Update']>) => {
   console.log('updateProduct called with id:', id, 'updates:', updates);
+  const ownerStocks = Array.isArray((updates as { owner_stocks?: unknown }).owner_stocks)
+    ? (updates as { owner_stocks: ProductOwnerStock[] }).owner_stocks
+    : undefined;
   
   // Special handling for current_stock updates
   if ('current_stock' in updates) {
@@ -809,6 +978,13 @@ export const updateProduct = async (id: string, updates: Partial<Database['publi
   
   // Clean up the updates object - convert empty strings to null for UUID fields
   const cleanedUpdates = { ...updates };
+  delete (cleanedUpdates as { owner_stocks?: ProductOwnerStock[] }).owner_stocks;
+  if (ownerStocks) {
+    (cleanedUpdates as { current_stock?: number }).current_stock = ownerStocks.reduce(
+      (sum, stock) => sum + Math.max(0, Math.floor(Number(stock.quantity) || 0)),
+      0
+    );
+  }
   
   // Convert empty strings to null for UUID fields
   if (cleanedUpdates.brand_id === '') cleanedUpdates.brand_id = null;
@@ -883,14 +1059,18 @@ export const updateProduct = async (id: string, updates: Partial<Database['publi
       if ('current_stock' in updates) {
         console.log('Stock update confirmed - new current_stock:', updatedProduct.current_stock);
       }
-      return updatedProduct;
+      await syncProductOwnerStocks(id, ownerStocks, serviceRoleClient);
+      const [withOwnerStocks] = await attachOwnerStocksToProducts([updatedProduct as Product], serviceRoleClient);
+      return withOwnerStocks;
     }
     
     console.log('Product updated successfully (anon key):', data);
     if ('current_stock' in updates) {
       console.log('Stock update confirmed - new current_stock:', data.current_stock);
     }
-    return data;
+    await syncProductOwnerStocks(id, ownerStocks);
+    const [withOwnerStocks] = await attachOwnerStocksToProducts([data as Product]);
+    return withOwnerStocks;
   } catch (err) {
     console.error('Error in updateProduct:', err);
     throw err;
@@ -982,6 +1162,12 @@ export const createStockMovement = async (movement: Omit<Database['public']['Tab
   return data;
 };
 
+const stockKey = (productId: string, ownerId: string | null | undefined) => `${productId}::${ownerId || ''}`;
+const splitStockKey = (key: string) => {
+  const [productId, ownerId] = key.split('::');
+  return { productId, ownerId };
+};
+
 export const createOrder = async (
   order: Omit<Database['public']['Tables']['orders']['Insert'], 'id'>,
   items: Omit<Database['public']['Tables']['order_items']['Insert'], 'id' | 'order_id'>[]
@@ -993,34 +1179,50 @@ export const createOrder = async (
   // App users authenticate through the app role system, not Supabase Auth. Use the
   // existing privileged data client so order and line-item RLS policies do not reject them.
   const client = createServiceRoleClient();
+  const defaultOwner = await ensureDefaultInventoryOwner(client);
   const requiredStock = new Map<string, number>();
 
   for (const item of items) {
     const quantity = Math.floor(Number(item.quantity));
+    const ownerId = item.owner_id || defaultOwner.id;
     if (!item.product_id || !Number.isFinite(quantity) || quantity <= 0) {
       throw new Error('Every sale item must have a product and a quantity greater than zero.');
     }
-    requiredStock.set(item.product_id, (requiredStock.get(item.product_id) || 0) + quantity);
+    const key = stockKey(item.product_id, ownerId);
+    requiredStock.set(key, (requiredStock.get(key) || 0) + quantity);
   }
 
-  const productIds = [...requiredStock.keys()];
+  const productIds = [...new Set([...requiredStock.keys()].map((key) => splitStockKey(key).productId))];
+  const ownerIds = [...new Set([...requiredStock.keys()].map((key) => splitStockKey(key).ownerId))];
   const { data: stockRows, error: stockError } = await client
     .from('products')
     .select('id, commercial_name, current_stock')
     .in('id', productIds);
+  const { data: ownerStockRows, error: ownerStockError } = await client
+    .from('product_owner_stocks')
+    .select(`product_id, owner_id, quantity, owner:inventory_owners(${ownerSelect})`)
+    .in('product_id', productIds)
+    .in('owner_id', ownerIds);
 
   if (stockError) throw stockError;
+  if (ownerStockError) throw ownerStockError;
+  const ownerStockByKey = new Map(
+    normalizeOwnerStocks(ownerStockRows as unknown[]).map((stock) => [stockKey(stock.product_id, stock.owner_id), stock])
+  );
 
-  for (const productId of productIds) {
+  for (const key of requiredStock.keys()) {
+    const { productId, ownerId } = splitStockKey(key);
     const product = stockRows?.find((row) => row.id === productId);
-    const requested = requiredStock.get(productId) || 0;
-    const available = Number(product?.current_stock || 0);
+    const requested = requiredStock.get(key) || 0;
+    const ownerStock = ownerStockByKey.get(key);
+    const ownerName = ownerStock?.owner?.name || (ownerId === defaultOwner.id ? defaultOwner.name : 'selected owner');
+    const available = Number(ownerStock?.quantity || 0);
 
     if (!product) {
       throw new Error('One of the selected products no longer exists. Refresh and try again.');
     }
     if (requested > available) {
-      throw new Error(`${product.commercial_name} has only ${available} units available.`);
+      throw new Error(`${product.commercial_name} has only ${available} units available for ${ownerName}.`);
     }
   }
 
@@ -1035,6 +1237,7 @@ export const createOrder = async (
   const orderItems = items.map((item) => ({
     product_id: item.product_id,
     batch_id: item.batch_id ?? null,
+    owner_id: item.owner_id || defaultOwner.id,
     quantity: item.quantity,
     unit_price: item.unit_price,
     total_price: item.total_price,
@@ -1069,6 +1272,7 @@ export const createOrder = async (
   const stockMovements = orderItems.map((item) => ({
     product_id: item.product_id,
     batch_id: item.batch_id,
+    owner_id: item.owner_id,
     movement_type: 'out' as const,
     quantity: item.quantity,
     reason: `Sale ${order.order_number}`,
@@ -1146,6 +1350,7 @@ export const updateOrderWithItems = async (
   }
 
   const client = createServiceRoleClient();
+  const defaultOwner = await ensureDefaultInventoryOwner(client);
   const [
     { data: existingOrder, error: orderReadError },
     { data: existingItems, error: itemsReadError }
@@ -1153,7 +1358,7 @@ export const updateOrderWithItems = async (
     client.from('orders').select('*').eq('id', orderId).single(),
     client
       .from('order_items')
-      .select('product_id, batch_id, quantity, unit_price, total_price')
+      .select('product_id, batch_id, owner_id, quantity, unit_price, total_price')
       .eq('order_id', orderId)
   ]);
 
@@ -1162,39 +1367,44 @@ export const updateOrderWithItems = async (
 
   const { data: existingMovements, error: movementsReadError } = await client
     .from('stock_movements')
-    .select('product_id, movement_type, quantity')
+    .select('product_id, owner_id, movement_type, quantity')
     .eq('reference_number', existingOrder.order_number)
     .like('reason', 'Sale%');
 
   if (movementsReadError) throw movementsReadError;
 
-  const desiredByProduct = new Map<string, number>();
+  const desiredByStock = new Map<string, number>();
   for (const item of items) {
     const quantity = Math.floor(Number(item.quantity));
+    const ownerId = item.owner_id || defaultOwner.id;
     if (!item.product_id || !Number.isFinite(quantity) || quantity <= 0) {
       throw new Error('Every sale item must have a product and a quantity greater than zero.');
     }
-    desiredByProduct.set(item.product_id, (desiredByProduct.get(item.product_id) || 0) + quantity);
+    const key = stockKey(item.product_id, ownerId);
+    desiredByStock.set(key, (desiredByStock.get(key) || 0) + quantity);
   }
 
-  const appliedByProduct = new Map<string, number>();
+  const appliedByStock = new Map<string, number>();
   for (const movement of existingMovements || []) {
     if (!movement.product_id) continue;
+    const ownerId = movement.owner_id || defaultOwner.id;
+    const key = stockKey(movement.product_id, ownerId);
     const direction = movement.movement_type === 'out' ? 1 : -1;
-    appliedByProduct.set(
-      movement.product_id,
-      (appliedByProduct.get(movement.product_id) || 0) + (direction * Number(movement.quantity || 0))
-    );
+    appliedByStock.set(key, (appliedByStock.get(key) || 0) + (direction * Number(movement.quantity || 0)));
   }
 
-  const affectedProductIds = [...new Set([
-    ...desiredByProduct.keys(),
-    ...appliedByProduct.keys()
+  const affectedStockKeys = [...new Set([
+    ...desiredByStock.keys(),
+    ...appliedByStock.keys()
   ])];
-  const deltas = affectedProductIds
-    .map((productId) => ({
-      productId,
-      quantity: (desiredByProduct.get(productId) || 0) - (appliedByProduct.get(productId) || 0)
+  const affectedProductIds = [...new Set([
+    ...affectedStockKeys.map((key) => splitStockKey(key).productId)
+  ])];
+  const affectedOwnerIds = [...new Set(affectedStockKeys.map((key) => splitStockKey(key).ownerId))];
+  const deltas = affectedStockKeys
+    .map((key) => ({
+      ...splitStockKey(key),
+      quantity: (desiredByStock.get(key) || 0) - (appliedByStock.get(key) || 0)
     }))
     .filter((delta) => delta.quantity !== 0);
 
@@ -1202,24 +1412,37 @@ export const updateOrderWithItems = async (
     .from('products')
     .select('id, commercial_name, current_stock')
     .in('id', affectedProductIds);
+  const { data: ownerStockRows, error: ownerStockError } = await client
+    .from('product_owner_stocks')
+    .select(`product_id, owner_id, quantity, owner:inventory_owners(${ownerSelect})`)
+    .in('product_id', affectedProductIds)
+    .in('owner_id', affectedOwnerIds);
 
   if (stockError) throw stockError;
+  if (ownerStockError) throw ownerStockError;
+  const ownerStockByKey = new Map(
+    normalizeOwnerStocks(ownerStockRows as unknown[]).map((stock) => [stockKey(stock.product_id, stock.owner_id), stock])
+  );
 
   for (const delta of deltas) {
     if (delta.quantity <= 0) continue;
     const product = stockRows?.find((row) => row.id === delta.productId);
-    const available = Number(product?.current_stock || 0);
+    const key = stockKey(delta.productId, delta.ownerId);
+    const ownerStock = ownerStockByKey.get(key);
+    const ownerName = ownerStock?.owner?.name || (delta.ownerId === defaultOwner.id ? defaultOwner.name : 'selected owner');
+    const available = Number(ownerStock?.quantity || 0);
     if (!product) {
       throw new Error('One of the selected products no longer exists. Refresh and try again.');
     }
     if (delta.quantity > available) {
-      throw new Error(`${product.commercial_name} has only ${available} units available.`);
+      throw new Error(`${product.commercial_name} has only ${available} units available for ${ownerName}.`);
     }
   }
 
   const replacementItems = items.map((item) => ({
     product_id: item.product_id,
     batch_id: item.batch_id ?? null,
+    owner_id: item.owner_id || defaultOwner.id,
     quantity: item.quantity,
     unit_price: item.unit_price,
     total_price: item.total_price,
@@ -1242,6 +1465,7 @@ export const updateOrderWithItems = async (
   const originalItems = (existingItems || []).map((item) => ({
     product_id: item.product_id,
     batch_id: item.batch_id,
+    owner_id: item.owner_id || defaultOwner.id,
     quantity: item.quantity,
     unit_price: item.unit_price,
     total_price: item.total_price,
@@ -1289,6 +1513,7 @@ export const updateOrderWithItems = async (
     const adjustmentMovements = deltas.map((delta) => ({
       product_id: delta.productId,
       batch_id: null,
+      owner_id: delta.ownerId,
       movement_type: delta.quantity > 0 ? 'out' as const : 'in' as const,
       quantity: Math.abs(delta.quantity),
       reason: delta.quantity > 0
@@ -1317,9 +1542,11 @@ export const updateOrderWithItems = async (
     console.error('Sale updated but refreshed stock could not be loaded:', productRefreshError);
   }
 
+  const productsWithOwnerStocks = await attachOwnerStocksToProducts(updatedProducts as Product[], client);
+
   return {
     order: updatedOrder,
-    products: updatedProducts || []
+    products: productsWithOwnerStocks || []
   };
 };
 
@@ -1327,7 +1554,9 @@ export const createPurchaseOrder = async (
   po: Omit<Database['public']['Tables']['purchase_orders']['Insert'], 'id'>,
   items: Omit<Database['public']['Tables']['purchase_order_items']['Insert'], 'id' | 'po_id'>[]
 ) => {
-  const { data: poData, error: poError } = await supabase
+  const client = createServiceRoleClient();
+  const defaultOwner = await ensureDefaultInventoryOwner(client);
+  const { data: poData, error: poError } = await client
     .from('purchase_orders')
     .insert(po)
     .select()
@@ -1338,19 +1567,158 @@ export const createPurchaseOrder = async (
     const poItems = items.map(item => ({
       po_id: poData.id,
       product_id: item.product_id,
+      owner_id: item.owner_id || defaultOwner.id,
       quantity: item.quantity,
       received_quantity: item.received_quantity ?? 0,
       unit_price: item.unit_price,
       total_price: item.total_price
     }));
 
-  const { error: itemsError } = await supabase
+  const { error: itemsError } = await client
     .from('purchase_order_items')
     .insert(poItems);
 
   if (itemsError) throw itemsError;
 
   return poData;
+};
+
+export const receivePurchaseOrderStock = async (poId: string): Promise<{
+  purchaseOrder: PurchaseOrder;
+  products: Product[];
+}> => {
+  const client = createServiceRoleClient();
+  const defaultOwner = await ensureDefaultInventoryOwner(client);
+  const { data: po, error: poError } = await client
+    .from('purchase_orders')
+    .select(`
+      *,
+      supplier:suppliers(name),
+      items:purchase_order_items(
+        id,
+        product_id,
+        owner_id,
+        quantity,
+        received_quantity,
+        unit_price,
+        total_price,
+        product:products(code, commercial_name),
+        owner:inventory_owners(name, owner_type)
+      )
+    `)
+    .eq('id', poId)
+    .single();
+
+  if (poError) throw poError;
+  if (po.status === 'received') {
+    const productIds = [...new Set((po.items || []).map((item: any) => item.product_id).filter(Boolean))];
+    const { data: products } = productIds.length
+      ? await client.from('products').select('*').in('id', productIds)
+      : { data: [] };
+    const [purchaseOrder] = await Promise.all([
+      getPurchaseOrders().then((orders) => orders.find((order) => order.id === poId) as PurchaseOrder),
+    ]);
+    return {
+      purchaseOrder: purchaseOrder || po as PurchaseOrder,
+      products: await attachOwnerStocksToProducts(products as Product[], client)
+    };
+  }
+
+  const validItems = (po.items || []).filter((item: any) => {
+    const received = Math.floor(Number(item.received_quantity || item.quantity || 0));
+    return item.product_id && received > 0;
+  });
+
+  if (validItems.length === 0) {
+    throw new Error('This purchase order has no receivable product quantities.');
+  }
+
+  for (const item of validItems) {
+    const received = Math.floor(Number(item.received_quantity || item.quantity || 0));
+    const { error: itemUpdateError } = await client
+      .from('purchase_order_items')
+      .update({
+        received_quantity: received,
+        owner_id: item.owner_id || defaultOwner.id
+      })
+      .eq('id', item.id);
+
+    if (itemUpdateError) throw itemUpdateError;
+  }
+
+  const performedAt = new Date().toISOString();
+  const movements = validItems.map((item: any) => ({
+    product_id: item.product_id,
+    batch_id: null,
+    owner_id: item.owner_id || defaultOwner.id,
+    movement_type: 'in' as const,
+    quantity: Math.floor(Number(item.received_quantity || item.quantity || 0)),
+    reason: `Purchase order ${po.po_number}`,
+    reference_number: po.po_number,
+    notes: po.notes,
+    performed_by: po.created_by,
+    performed_at: performedAt
+  }));
+
+  const { error: movementError } = await client
+    .from('stock_movements')
+    .insert(movements);
+
+  if (movementError) throw movementError;
+
+  const { data: updatedPO, error: updatePOError } = await client
+    .from('purchase_orders')
+    .update({
+      status: 'received',
+      actual_delivery_date: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', poId)
+    .select(`
+      *,
+      supplier:suppliers(name),
+      items:purchase_order_items(
+        id,
+        product_id,
+        owner_id,
+        quantity,
+        received_quantity,
+        unit_price,
+        total_price,
+        product:products(code, commercial_name),
+        owner:inventory_owners(name, owner_type)
+      )
+    `)
+    .single();
+
+  if (updatePOError) throw updatePOError;
+
+  const productIds = [...new Set(validItems.map((item: any) => item.product_id))];
+  const { data: updatedProducts, error: productsError } = await client
+    .from('products')
+    .select('*')
+    .in('id', productIds);
+
+  if (productsError) throw productsError;
+
+  return {
+    purchaseOrder: {
+      ...updatedPO,
+      supplier_name: updatedPO.supplier?.name || 'Unknown Supplier',
+      items: updatedPO.items?.map((item: any) => ({
+        id: item.id,
+        product_id: item.product_id,
+        product_name: item.product?.commercial_name || 'Unknown Product',
+        owner_id: item.owner_id || null,
+        owner_name: item.owner?.name || null,
+        quantity: item.quantity,
+        received_quantity: item.received_quantity || 0,
+        unit_price: item.unit_price,
+        total_price: item.total_price
+      })) || []
+    } as PurchaseOrder,
+    products: await attachOwnerStocksToProducts(updatedProducts as Product[], client)
+  };
 };
 
 export const getBrands = async () => {

@@ -33,12 +33,33 @@ export interface Product {
   updated_at: string;
   created_by: string | null;
   updated_by: string | null;
+  owner_stocks?: ProductOwnerStock[];
+}
+
+export interface InventoryOwner {
+  id: string;
+  name: string;
+  owner_type: 'company' | 'person';
+  is_default: boolean;
+  is_active: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductOwnerStock {
+  product_id: string;
+  owner_id: string;
+  quantity: number;
+  updated_at?: string;
+  owner?: Pick<InventoryOwner, 'id' | 'name' | 'owner_type' | 'is_default'> | null;
 }
 
 export interface StockMovement {
   id: string;
   product_id: string;
   batch_id: string | null;
+  owner_id?: string | null;
   movement_type: 'in' | 'out';
   quantity: number;
   reason: string;
@@ -74,6 +95,8 @@ export interface OrderItem {
   product_id: string;
   product_name: string; // Frontend-only for display
   batch_id?: string | null;
+  owner_id?: string | null;
+  owner_name?: string | null;
   quantity: number;
   unit_price: number;
   total_price: number;
@@ -103,6 +126,8 @@ export interface PurchaseOrderItem {
   po_id?: string;
   product_id: string;
   product_name: string; // Frontend-only for display
+  owner_id?: string | null;
+  owner_name?: string | null;
   quantity: number;
   received_quantity?: number;
   unit_price: number;

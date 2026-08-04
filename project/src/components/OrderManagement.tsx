@@ -14,7 +14,7 @@ import {
   UserRound,
   X
 } from 'lucide-react';
-import { Order, OrderItem, Product } from '../types';
+import { InventoryOwner, Order, OrderItem, Product } from '../types';
 import {
   formatCurrency,
   formatDate,
@@ -28,6 +28,7 @@ import { getOrderDestinationLabel, normalizeOrderDestination } from '../utils/or
 interface OrderManagementProps {
   orders: Order[];
   products: Product[];
+  inventoryOwners: InventoryOwner[];
   openNewOrderSignal?: number;
   onNewOrderOpened?: () => void;
   onAddOrder: (order: Order) => Order | void | Promise<Order | void>;
@@ -55,6 +56,7 @@ const statusStyles: Record<Order['status'], string> = {
 export const OrderManagement: React.FC<OrderManagementProps> = ({
   orders,
   products,
+  inventoryOwners,
   openNewOrderSignal = 0,
   onNewOrderOpened,
   onAddOrder,
@@ -244,6 +246,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({
         <OrderForm
           order={editingOrder}
           products={products}
+          inventoryOwners={inventoryOwners}
           onSave={async (order) => {
             if (editingOrder) {
               await onUpdateOrder(order, { syncItems: true });
@@ -281,25 +284,35 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({
 interface OrderFormProps {
   order: Order | null;
   products: Product[];
+  inventoryOwners: InventoryOwner[];
   onSave: (order: Order) => Order | void | Promise<Order | void>;
   onSaved: () => void;
   onClose: () => void;
 }
 
-const OrderForm: React.FC<OrderFormProps> = ({ order, products, onSave, onSaved, onClose }) => {
+const OrderForm: React.FC<OrderFormProps> = ({ order, products, inventoryOwners, onSave, onSaved, onClose }) => {
+  const defaultOwner = useMemo(
+    () => inventoryOwners.find((owner) => owner.is_default) || inventoryOwners[0] || null,
+    [inventoryOwners]
+  );
   const initialItems = useMemo<OrderItem[]>(() => {
     if (!order) return [];
-    return resolveOrderItemsForDisplay(
-      order,
-      products as Parameters<typeof resolveOrderItemsForDisplay>[1]
-    ).map((item) => ({
+    const sourceItems = order.items && order.items.length > 0
+      ? order.items
+      : resolveOrderItemsForDisplay(
+          order,
+          products as Parameters<typeof resolveOrderItemsForDisplay>[1]
+        );
+    return sourceItems.map((item) => ({
       product_id: item.product_id,
       product_name: item.product_name,
+      owner_id: item.owner_id || defaultOwner?.id || null,
+      owner_name: item.owner_name || inventoryOwners.find((owner) => owner.id === item.owner_id)?.name || defaultOwner?.name || null,
       quantity: item.quantity,
       unit_price: item.unit_price,
       total_price: item.total_price
     }));
-  }, [order, products]);
+  }, [defaultOwner?.id, defaultOwner?.name, inventoryOwners, order, products]);
 
   const [customerName, setCustomerName] = useState(order?.customer_name || 'Walk-in customer');
   const [customerPhone, setCustomerPhone] = useState(order?.customer_phone || '');
@@ -342,18 +355,23 @@ const OrderForm: React.FC<OrderFormProps> = ({ order, products, onSave, onSaved,
 
   const totalAmount = orderItems.reduce((sum, item) => sum + item.total_price, 0);
   const totalUnits = orderItems.reduce((sum, item) => sum + item.quantity, 0);
+  const resolveOwner = (ownerId?: string | null) => inventoryOwners.find((owner) => owner.id === ownerId) || defaultOwner || null;
 
   const addProduct = (product: Product) => {
     setOrderItems((current) => {
-      const existing = current.find((item) => item.product_id === product.id);
+      const ownerId = defaultOwner?.id || '';
+      const ownerName = defaultOwner?.name || null;
+      const existing = current.find((item) => item.product_id === product.id && (item.owner_id || '') === ownerId);
       if (existing) {
-        return current.map((item) => item.product_id === product.id
+        return current.map((item) => item.product_id === product.id && (item.owner_id || '') === ownerId
           ? { ...item, quantity: item.quantity + 1, total_price: (item.quantity + 1) * item.unit_price }
           : item);
       }
       return [...current, {
         product_id: product.id,
         product_name: product.commercial_name,
+        owner_id: ownerId || null,
+        owner_name: ownerName,
         quantity: 1,
         unit_price: product.price,
         total_price: product.price
@@ -361,11 +379,36 @@ const OrderForm: React.FC<OrderFormProps> = ({ order, products, onSave, onSaved,
     });
   };
 
-  const updateQuantity = (productId: string, nextQuantity: number) => {
+  const updateQuantity = (index: number, nextQuantity: number) => {
     if (nextQuantity < 1) return;
-    setOrderItems((current) => current.map((item) => item.product_id === productId
+    setOrderItems((current) => current.map((item, itemIndex) => itemIndex === index
       ? { ...item, quantity: nextQuantity, total_price: nextQuantity * item.unit_price }
       : item));
+  };
+
+  const updateItemOwner = (index: number, ownerId: string) => {
+    setOrderItems((current) => {
+      const next = current.map((item, itemIndex) => itemIndex === index
+        ? { ...item, owner_id: ownerId || null, owner_name: resolveOwner(ownerId)?.name || null }
+        : item);
+      const target = next[index];
+      if (!target) return current;
+      const duplicateIndex = next.findIndex((item, itemIndex) => itemIndex !== index && item.product_id === target.product_id && (item.owner_id || '') === (target.owner_id || ''));
+      if (duplicateIndex >= 0) {
+        const mergedQuantity = (next[duplicateIndex].quantity || 0) + (target.quantity || 0);
+        const merged = {
+          ...next[duplicateIndex],
+          owner_id: target.owner_id || null,
+          owner_name: target.owner_name || null,
+          quantity: mergedQuantity,
+          total_price: mergedQuantity * next[duplicateIndex].unit_price
+        };
+        const remaining = next.filter((_, itemIndex) => itemIndex !== index && itemIndex !== duplicateIndex);
+        remaining.splice(Math.min(index, duplicateIndex), 0, merged);
+        return remaining;
+      }
+      return next;
+    });
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -487,31 +530,52 @@ const OrderForm: React.FC<OrderFormProps> = ({ order, products, onSave, onSaved,
               </div>
             ) : (
               <div className="mt-4 space-y-2">
-                {orderItems.map((item) => (
-                  <div key={item.product_id} className="rounded-md border border-gray-200 bg-white p-3">
+                {orderItems.map((item, index) => {
+                  const product = products.find((candidate) => candidate.id === item.product_id);
+                  const selectedOwner = resolveOwner(item.owner_id);
+                  const ownerStock = product?.owner_stocks?.find((stock) => stock.owner_id === (item.owner_id || selectedOwner?.id || ''));
+                  const available = Number(ownerStock?.quantity ?? product?.current_stock ?? 0);
+                  return (
+                  <div key={`${item.product_id}-${item.owner_id || 'owner'}-${index}`} className="rounded-md border border-gray-200 bg-white p-3">
                     <div className="flex items-start gap-3">
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-gray-950">{item.product_name}</p>
+                        <p className="mt-0.5 text-xs text-gray-500">
+                          {selectedOwner?.name || item.owner_name || 'Company'} • {available} available
+                        </p>
                         <p className="mt-0.5 text-xs text-gray-500">{formatCurrency(item.unit_price)} each</p>
                       </div>
                       <p className="whitespace-nowrap text-sm font-semibold text-gray-950">{formatCurrency(item.total_price)}</p>
                     </div>
-                    <div className="mt-3 flex items-center justify-between">
+                    <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_11rem_auto] sm:items-end">
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-gray-500">Owner</label>
+                        <select
+                          value={item.owner_id || ''}
+                          onChange={(event) => updateItemOwner(index, event.target.value)}
+                          className="h-9 w-full rounded-md border border-gray-300 bg-white px-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                        >
+                          <option value="">Select owner</option>
+                          {inventoryOwners.map((owner) => (
+                            <option key={owner.id} value={owner.id}>{owner.name}</option>
+                          ))}
+                        </select>
+                      </div>
                       <div className="flex h-9 items-center rounded-md border border-gray-300 bg-white">
-                        <button type="button" onClick={() => updateQuantity(item.product_id, item.quantity - 1)} className="flex h-8 w-9 items-center justify-center text-gray-600 hover:bg-gray-50" title="Decrease quantity">
+                        <button type="button" onClick={() => updateQuantity(index, item.quantity - 1)} className="flex h-8 w-9 items-center justify-center text-gray-600 hover:bg-gray-50" title="Decrease quantity">
                           <Minus className="h-4 w-4" />
                         </button>
                         <span className="min-w-9 text-center text-sm font-semibold text-gray-900">{item.quantity}</span>
-                        <button type="button" onClick={() => updateQuantity(item.product_id, item.quantity + 1)} className="flex h-8 w-9 items-center justify-center text-gray-600 hover:bg-gray-50" title="Increase quantity">
+                        <button type="button" onClick={() => updateQuantity(index, item.quantity + 1)} className="flex h-8 w-9 items-center justify-center text-gray-600 hover:bg-gray-50" title="Increase quantity">
                           <Plus className="h-4 w-4" />
                         </button>
                       </div>
-                      <button type="button" onClick={() => setOrderItems((current) => current.filter((line) => line.product_id !== item.product_id))} className="flex h-9 w-9 items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-700" title="Remove product">
+                      <button type="button" onClick={() => setOrderItems((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="flex h-9 w-9 items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-700" title="Remove product">
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
                   </div>
-                ))}
+                )})}
               </div>
             )}
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Brand, Product, Supplier } from '../types';
+import { Brand, InventoryOwner, Product, Supplier } from '../types';
 import { AddProductPage } from './AddProductPage';
 import { EmptyState, PageHeader } from './shared/PageLayout';
 
@@ -9,9 +9,10 @@ interface EditProductPageProps {
   onBack: () => void;
   brands: Brand[];
   suppliers: Supplier[];
+  inventoryOwners: InventoryOwner[];
 }
 
-export const EditProductPage: React.FC<EditProductPageProps> = ({ product, onSave, onBack, brands, suppliers }) => {
+export const EditProductPage: React.FC<EditProductPageProps> = ({ product, onSave, onBack, brands, suppliers, inventoryOwners }) => {
   if (!product) {
     return (
       <div className="space-y-5">
@@ -23,5 +24,14 @@ export const EditProductPage: React.FC<EditProductPageProps> = ({ product, onSav
     );
   }
 
-  return <AddProductPage product={product} onSave={onSave} onBack={onBack} brands={brands} suppliers={suppliers} />;
+  return (
+    <AddProductPage
+      product={product}
+      onSave={onSave}
+      onBack={onBack}
+      brands={brands}
+      suppliers={suppliers}
+      inventoryOwners={inventoryOwners}
+    />
+  );
 };

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Loader2, Save } from 'lucide-react';
-import { Brand, Product, ProductType, Supplier } from '../types';
+import { Brand, InventoryOwner, Product, ProductOwnerStock, ProductType, Supplier } from '../types';
 import { checkProductExists } from '../lib/supabase';
 import { Button } from './shared/Button';
 import { Checkbox, FormField, Input, Select, TextArea } from './shared/Form';
@@ -11,6 +11,7 @@ interface AddProductPageProps {
   onBack: () => void;
   brands: Brand[];
   suppliers: Supplier[];
+  inventoryOwners: InventoryOwner[];
   product?: Product | null;
 }
 
@@ -48,7 +49,8 @@ const createDraft = (product?: Product | null): ProductDraft => product ? ({
   season: product.season,
   is_tester: product.is_tester,
   created_by: product.created_by,
-  updated_by: product.updated_by
+  updated_by: product.updated_by,
+  owner_stocks: product.owner_stocks || []
 }) : ({
   code: '',
   item_number: '',
@@ -72,7 +74,8 @@ const createDraft = (product?: Product | null): ProductDraft => product ? ({
   season: null,
   is_tester: false,
   created_by: null,
-  updated_by: null
+  updated_by: null,
+  owner_stocks: []
 });
 
 export const AddProductPage: React.FC<AddProductPageProps> = ({
@@ -80,14 +83,53 @@ export const AddProductPage: React.FC<AddProductPageProps> = ({
   onBack,
   brands,
   suppliers,
+  inventoryOwners,
   product = null
 }) => {
   const [formData, setFormData] = useState<ProductDraft>(() => createDraft(product));
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const defaultOwner = useMemo(
+    () => inventoryOwners.find((owner) => owner.is_default) || inventoryOwners[0] || null,
+    [inventoryOwners]
+  );
+
+  useEffect(() => {
+    if (!defaultOwner || (formData.owner_stocks || []).length > 0) return;
+    setFormData((current) => ({
+      ...current,
+      owner_stocks: [{
+        product_id: product?.id || 'draft',
+        owner_id: defaultOwner.id,
+        quantity: current.current_stock || 0,
+        owner: {
+          id: defaultOwner.id,
+          name: defaultOwner.name,
+          owner_type: defaultOwner.owner_type,
+          is_default: defaultOwner.is_default
+        }
+      } as ProductOwnerStock]
+    }));
+  }, [defaultOwner, formData.owner_stocks, product?.id]);
 
   const setNumber = (field: keyof ProductDraft, value: string) => {
     setFormData((current) => ({ ...current, [field]: Number(value) || 0 }));
+  };
+
+  const ownerRows = formData.owner_stocks || [];
+
+  const updateOwnerQuantity = (ownerId: string, quantity: number) => {
+    setFormData((current) => {
+      const next = [...(current.owner_stocks || [])];
+      const index = next.findIndex((stock) => stock.owner_id === ownerId);
+      if (index >= 0) {
+        next[index] = { ...next[index], quantity: Math.max(0, quantity) };
+      } else {
+        next.push({ product_id: product?.id || 'draft', owner_id: ownerId, quantity: Math.max(0, quantity) });
+      }
+      const total = next.reduce((sum, stock) => sum + Number(stock.quantity || 0), 0);
+      return { ...current, owner_stocks: next, current_stock: total };
+    });
   };
 
   const handleTypeChange = (productType: ProductType) => {
@@ -243,6 +285,34 @@ export const AddProductPage: React.FC<AddProductPageProps> = ({
             <FormField label="Maximum stock">
               <Input type="number" min="0" value={formData.max_stock} onChange={(event) => setNumber('max_stock', event.target.value)} />
             </FormField>
+          </div>
+        </section>
+
+        <section className="border-b border-gray-200 p-4 sm:p-6">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold text-gray-900">Owner stock</h2>
+            <p className="text-sm text-gray-500">Split this product between company and people</p>
+          </div>
+          <div className="mt-4 space-y-3">
+            {inventoryOwners.length === 0 ? (
+              <p className="text-sm text-gray-500">Create an inventory owner first.</p>
+            ) : inventoryOwners.map((owner) => {
+              const row = ownerRows.find((stock) => stock.owner_id === owner.id);
+              return (
+                <div key={owner.id} className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
+                  <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+                    <p className="text-sm font-medium text-gray-900">{owner.name}</p>
+                    <p className="text-xs text-gray-500 capitalize">{owner.owner_type}</p>
+                  </div>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={row?.quantity ?? 0}
+                    onChange={(event) => updateOwnerQuantity(owner.id, Number(event.target.value) || 0)}
+                  />
+                </div>
+              );
+            })}
           </div>
         </section>
 

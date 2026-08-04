@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Eye, FileText, Package, Plus, Search, Trash2 } from 'lucide-react';
-import { Product, PurchaseOrder, PurchaseOrderItem, Supplier } from '../types';
+import { InventoryOwner, Product, PurchaseOrder, PurchaseOrderItem, Supplier } from '../types';
 import { formatCurrency, formatDate } from '../utils/stockUtils';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from './shared/Button';
@@ -12,13 +12,14 @@ interface PurchaseOrdersProps {
   purchaseOrders: PurchaseOrder[];
   products: Product[];
   suppliers: Supplier[];
+  inventoryOwners: InventoryOwner[];
   onAddPurchaseOrder: (
     po: Omit<PurchaseOrder, 'id' | 'created_at' | 'updated_at'>,
     items: PurchaseOrderItem[]
   ) => void | Promise<void>;
   onUpdatePurchaseOrder: (po: PurchaseOrder) => void;
   onDeletePurchaseOrder: (id: string) => void;
-  onUpdateProduct: (product: Product) => void;
+  onReceivePurchaseOrder: (po: PurchaseOrder) => void | Promise<void>;
 }
 
 const statusStyles: Record<PurchaseOrder['status'], string> = {
@@ -39,10 +40,11 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
   purchaseOrders,
   products,
   suppliers,
+  inventoryOwners,
   onAddPurchaseOrder,
   onUpdatePurchaseOrder,
   onDeletePurchaseOrder,
-  onUpdateProduct
+  onReceivePurchaseOrder
 }) => {
   const { hasPermission } = useAuth();
   const [search, setSearch] = useState('');
@@ -62,25 +64,6 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
   if (!hasPermission('view_purchase_orders')) {
     return <EmptyState icon={<Package className="h-10 w-10" />} title="Access denied" description="You do not have permission to view purchase orders." />;
   }
-
-  const receivePurchaseOrder = (po: PurchaseOrder) => {
-    (po.items || []).forEach((item) => {
-      const product = products.find((candidate) => candidate.id === item.product_id);
-      const received = item.received_quantity || item.quantity;
-      if (product && received > 0) {
-        onUpdateProduct({ ...product, current_stock: product.current_stock + received, updated_at: new Date().toISOString() });
-      }
-    });
-    const updated = {
-      ...po,
-      status: 'received' as const,
-      actual_delivery_date: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      items: (po.items || []).map((item) => ({ ...item, received_quantity: item.received_quantity || item.quantity }))
-    };
-    onUpdatePurchaseOrder(updated);
-    setViewingPO(updated);
-  };
 
   return (
     <div className="space-y-5">
@@ -180,6 +163,7 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
         isOpen={formOpen}
         products={products}
         suppliers={suppliers}
+        inventoryOwners={inventoryOwners}
         onClose={() => setFormOpen(false)}
         onSave={async (po, items) => {
           await onAddPurchaseOrder(po, items);
@@ -191,7 +175,20 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
         <PurchaseOrderDetail
           po={viewingPO}
           onClose={() => setViewingPO(null)}
-          onReceive={() => receivePurchaseOrder(viewingPO)}
+          onReceive={async () => {
+            await onReceivePurchaseOrder(viewingPO);
+            const updated = {
+              ...viewingPO,
+              status: 'received' as const,
+              actual_delivery_date: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            };
+            onUpdatePurchaseOrder(updated);
+            setViewingPO({
+              ...updated,
+              items: viewingPO.items || []
+            });
+          }}
           onDelete={hasPermission('edit_purchase_order') ? () => {
             if (window.confirm(`Delete ${viewingPO.po_number}?`)) {
               onDeletePurchaseOrder(viewingPO.id);
@@ -204,21 +201,31 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
   );
 };
 
-type DraftItem = { product_id: string; quantity: number; unit_price: number };
+type DraftItem = { product_id: string; owner_id: string; quantity: number; unit_price: number };
 
 const PurchaseOrderForm: React.FC<{
   isOpen: boolean;
   products: Product[];
   suppliers: Supplier[];
+  inventoryOwners: InventoryOwner[];
   onClose: () => void;
   onSave: (po: Omit<PurchaseOrder, 'id' | 'created_at' | 'updated_at'>, items: PurchaseOrderItem[]) => void | Promise<void>;
-}> = ({ isOpen, products, suppliers, onClose, onSave }) => {
+}> = ({ isOpen, products, suppliers, inventoryOwners, onClose, onSave }) => {
   const [supplierId, setSupplierId] = useState('');
   const [expectedDate, setExpectedDate] = useState('');
   const [notes, setNotes] = useState('');
-  const [items, setItems] = useState<DraftItem[]>([{ product_id: '', quantity: 1, unit_price: 0 }]);
+  const defaultOwner = useMemo(
+    () => inventoryOwners.find((owner) => owner.is_default) || inventoryOwners[0] || null,
+    [inventoryOwners]
+  );
+  const [items, setItems] = useState<DraftItem[]>([{ product_id: '', owner_id: defaultOwner?.id || '', quantity: 1, unit_price: 0 }]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!defaultOwner || items.some((item) => item.owner_id)) return;
+    setItems((current) => current.map((item) => ({ ...item, owner_id: defaultOwner.id })));
+  }, [defaultOwner, items]);
 
   const total = items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
   const updateItem = (index: number, next: Partial<DraftItem>) => setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...next } : item));
@@ -227,7 +234,7 @@ const PurchaseOrderForm: React.FC<{
     setSupplierId('');
     setExpectedDate('');
     setNotes('');
-    setItems([{ product_id: '', quantity: 1, unit_price: 0 }]);
+    setItems([{ product_id: '', owner_id: defaultOwner?.id || '', quantity: 1, unit_price: 0 }]);
     setError(null);
   };
 
@@ -241,6 +248,8 @@ const PurchaseOrderForm: React.FC<{
       const purchaseItems: PurchaseOrderItem[] = validItems.map((item) => ({
         product_id: item.product_id,
         product_name: products.find((product) => product.id === item.product_id)?.commercial_name || 'Unknown product',
+        owner_id: item.owner_id || defaultOwner?.id || null,
+        owner_name: inventoryOwners.find((owner) => owner.id === (item.owner_id || defaultOwner?.id || ''))?.name || null,
         quantity: item.quantity,
         received_quantity: 0,
         unit_price: item.unit_price,
@@ -286,13 +295,23 @@ const PurchaseOrderForm: React.FC<{
         <section className="border-t border-gray-200 pt-5">
           <div className="flex items-center justify-between gap-3">
             <h3 className="font-semibold text-gray-900">Products</h3>
-            <Button type="button" variant="outline" size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setItems((current) => [...current, { product_id: '', quantity: 1, unit_price: 0 }])}>Add line</Button>
+            <Button type="button" variant="outline" size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setItems((current) => [...current, { product_id: '', owner_id: defaultOwner?.id || '', quantity: 1, unit_price: 0 }])}>Add line</Button>
           </div>
           <div className="mt-3 space-y-3">
             {items.map((item, index) => (
-              <div key={index} className="grid grid-cols-[1fr_5rem_7rem_2.25rem] items-end gap-2">
+              <div key={index} className="grid gap-2 sm:grid-cols-[1fr_10rem_5rem_7rem_2.25rem]">
                 <FormField label={index === 0 ? 'Product' : ''}>
                   <Select value={item.product_id} onChange={(event) => updateItem(index, { product_id: event.target.value })} options={[{ value: '', label: 'Select product' }, ...products.map((product) => ({ value: product.id, label: `${product.code} - ${product.commercial_name}` }))]} />
+                </FormField>
+                <FormField label={index === 0 ? 'Owner' : ''}>
+                  <Select
+                    value={item.owner_id || ''}
+                    onChange={(event) => updateItem(index, { owner_id: event.target.value })}
+                    options={[
+                      { value: '', label: 'Select owner' },
+                      ...inventoryOwners.map((owner) => ({ value: owner.id, label: owner.name }))
+                    ]}
+                  />
                 </FormField>
                 <FormField label={index === 0 ? 'Qty' : ''}>
                   <Input type="number" min="1" value={item.quantity} onChange={(event) => updateItem(index, { quantity: Number(event.target.value) || 0 })} />
@@ -337,7 +356,7 @@ const PurchaseOrderDetail: React.FC<{
       <div className="overflow-x-auto border-y border-gray-200">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50 text-left text-xs font-medium uppercase text-gray-500"><tr><th className="px-3 py-2">Product</th><th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2 text-right">Unit cost</th><th className="px-3 py-2 text-right">Total</th></tr></thead>
-          <tbody className="divide-y divide-gray-200">{(po.items || []).map((item, index) => <tr key={item.id || `${item.product_id}-${index}`}><td className="px-3 py-3 font-medium text-gray-900">{item.product_name}</td><td className="px-3 py-3 text-right text-gray-700">{item.quantity}</td><td className="px-3 py-3 text-right text-gray-700">{formatCurrency(item.unit_price)}</td><td className="px-3 py-3 text-right font-medium text-gray-900">{formatCurrency(item.total_price)}</td></tr>)}</tbody>
+          <tbody className="divide-y divide-gray-200">{(po.items || []).map((item, index) => <tr key={item.id || `${item.product_id}-${index}`}><td className="px-3 py-3 font-medium text-gray-900">{item.product_name}<p className="mt-0.5 text-xs text-gray-500">{item.owner_name || 'Unknown owner'}</p></td><td className="px-3 py-3 text-right text-gray-700">{item.quantity}</td><td className="px-3 py-3 text-right text-gray-700">{formatCurrency(item.unit_price)}</td><td className="px-3 py-3 text-right font-medium text-gray-900">{formatCurrency(item.total_price)}</td></tr>)}</tbody>
         </table>
       </div>
       {po.notes && <div><h3 className="text-sm font-medium text-gray-700">Notes</h3><p className="mt-1 text-sm text-gray-600">{po.notes}</p></div>}
