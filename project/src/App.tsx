@@ -768,6 +768,7 @@ function AppContent() {
         {activeTab === 'products' && hasPermission('view_products') && (
           <ProductList
             products={products}
+            inventoryOwners={inventoryOwners}
             onAddProduct={handleAddProduct}
             onEditProduct={handleEditProduct}
             onDeleteProduct={handleDeleteProduct}

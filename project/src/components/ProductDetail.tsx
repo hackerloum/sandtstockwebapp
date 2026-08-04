@@ -39,6 +39,12 @@ const DetailItem = ({ label, value }: { label: string; value: React.ReactNode })
   </div>
 );
 
+const ownerToneClass = (ownerType?: string | null) => (
+  ownerType === 'company'
+    ? 'border-sky-200 bg-sky-50 text-sky-700'
+    : 'border-violet-200 bg-violet-50 text-violet-700'
+);
+
 export const ProductDetail: React.FC<ProductDetailProps> = ({
   product,
   isOpen,
@@ -126,15 +132,17 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
               </div>
             ) : ownerStocks.map((stock) => (
               <div key={stock.owner_id} className="flex items-center justify-between gap-4 px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium text-gray-900">
+                <div className={`inline-flex items-center gap-2 rounded border px-2.5 py-1.5 ${ownerToneClass(stock.owner?.owner_type || inventoryOwners.find((owner) => owner.id === stock.owner_id)?.owner_type)}`}>
+                  <span className="text-sm font-medium text-gray-900">
                     {stock.owner?.name || inventoryOwners.find((owner) => owner.id === stock.owner_id)?.name || 'Owner'}
-                  </p>
-                  <p className="text-xs text-gray-500 capitalize">
-                    {stock.owner?.owner_type || inventoryOwners.find((owner) => owner.id === stock.owner_id)?.owner_type || 'person'}
-                  </p>
+                  </span>
+                  <span className="text-xs font-semibold">
+                    {stock.quantity}
+                  </span>
                 </div>
-                <p className="text-sm font-semibold text-gray-950">{stock.quantity}</p>
+                <p className="text-xs uppercase tracking-wide text-gray-500">
+                  {stock.owner?.owner_type || inventoryOwners.find((owner) => owner.id === stock.owner_id)?.owner_type || 'person'}
+                </p>
               </div>
             ))}
           </div>

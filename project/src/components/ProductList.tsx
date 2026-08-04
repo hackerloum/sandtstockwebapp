@@ -28,6 +28,7 @@ import { EmptyState, PageHeader } from './shared/PageLayout';
 
 interface ProductListProps {
   products: Product[];
+  inventoryOwners: { id: string; name: string; owner_type: 'company' | 'person' }[];
   onAddProduct: () => void;
   onEditProduct: (product: Product) => void;
   onDeleteProduct: (id: string) => void;
@@ -73,6 +74,7 @@ const stockPresentation = (product: Product) => {
 
 export const ProductList: React.FC<ProductListProps> = ({
   products,
+  inventoryOwners,
   onAddProduct,
   onEditProduct,
   onDeleteProduct,
@@ -110,6 +112,49 @@ export const ProductList: React.FC<ProductListProps> = ({
     () => Array.from(new Set(extendedProducts.map((product) => product.brand?.name || product.brand_id).filter(Boolean) as string[])).sort(),
     [extendedProducts]
   );
+
+  const getOwnerName = useCallback((ownerId: string | null | undefined, fallbackOwner?: { name?: string | null } | null) => {
+    if (fallbackOwner?.name) return fallbackOwner.name;
+    if (!ownerId) return 'Owner';
+    return inventoryOwners.find((owner) => owner.id === ownerId)?.name || 'Owner';
+  }, [inventoryOwners]);
+
+  const getOwnerToneClass = (ownerType?: string | null) => (
+    ownerType === 'company'
+      ? 'border-sky-200 bg-sky-50 text-sky-700'
+      : 'border-violet-200 bg-violet-50 text-violet-700'
+  );
+
+  const renderOwnerChips = (product: ExtendedProduct) => {
+    const ownerStocks = (product.owner_stocks || []).filter((stock) => Number(stock.quantity || 0) > 0);
+    if (ownerStocks.length === 0) {
+      return (
+        <span className="inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-medium text-gray-500">
+          Unsplit stock
+        </span>
+      );
+    }
+
+    return (
+      <div className="flex flex-wrap gap-1.5">
+        {ownerStocks.slice(0, 3).map((stock) => (
+          <span
+            key={stock.owner_id}
+            className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-[11px] font-medium ${getOwnerToneClass(stock.owner?.owner_type || inventoryOwners.find((owner) => owner.id === stock.owner_id)?.owner_type)}`}
+            title={`${getOwnerName(stock.owner_id, stock.owner)}: ${stock.quantity}`}
+          >
+            <span className="max-w-20 truncate">{getOwnerName(stock.owner_id, stock.owner)}</span>
+            <span className="font-semibold">{stock.quantity}</span>
+          </span>
+        ))}
+        {ownerStocks.length > 3 && (
+          <span className="inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-medium text-gray-500">
+            +{ownerStocks.length - 3} more
+          </span>
+        )}
+      </div>
+    );
+  };
 
   const filteredProducts = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -477,6 +522,10 @@ export const ProductList: React.FC<ProductListProps> = ({
                         </span>
                       </div>
                     </div>
+                    <div className="mt-3">
+                      <p className="text-xs font-medium text-gray-500">Owner stock</p>
+                      <div className="mt-1">{renderOwnerChips(product)}</div>
+                    </div>
                   </article>
                 );
               })}
@@ -510,6 +559,7 @@ export const ProductList: React.FC<ProductListProps> = ({
                         <td className="px-4 py-3">
                           <p className="text-sm font-semibold text-gray-900">{product.current_stock || 0}</p>
                           <p className="text-xs text-gray-500">Min {product.min_stock || 0}</p>
+                          <div className="mt-2">{renderOwnerChips(product)}</div>
                         </td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center gap-1.5 rounded border px-2 py-1 text-xs font-medium ${stock.className}`}>
