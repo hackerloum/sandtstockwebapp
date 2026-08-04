@@ -489,18 +489,38 @@ export const checkProductExists = async (code: string, excludeId?: string) => {
 };
 
 export const getStockMovements = async () => {
-  const { data, error } = await supabase
-    .from('stock_movements')
-    .select(`
+  const query = `
       *,
       product:products(code, commercial_name),
       batch:product_batches(batch_number),
       owner:inventory_owners(name, owner_type)
-    `)
+    `;
+  const fallbackQuery = `
+      *,
+      product:products(code, commercial_name),
+      batch:product_batches(batch_number)
+    `;
+
+  const { data, error } = await supabase
+    .from('stock_movements')
+    .select(query)
     .order('performed_at', { ascending: false });
   
-  if (error) throw error;
-  return data;
+  if (!error) return data;
+
+  if (error.code === 'PGRST200' || error.code === '42P01') {
+    const { data: fallbackData, error: fallbackError } = await supabase
+      .from('stock_movements')
+      .select(fallbackQuery)
+      .order('performed_at', { ascending: false });
+    if (fallbackError) {
+      console.error('Fallback stock movements query failed:', fallbackError);
+      return [];
+    }
+    return fallbackData;
+  }
+
+  throw error;
 };
 
 // Debug function to test basic database connection
@@ -789,9 +809,7 @@ export const getOrders = async () => {
 };
 
 export const getPurchaseOrders = async () => {
-  const { data, error } = await supabase
-    .from('purchase_orders')
-    .select(`
+  const detailedQuery = `
       *,
       supplier:suppliers(name),
       items:purchase_order_items(
@@ -805,13 +823,57 @@ export const getPurchaseOrders = async () => {
         product:products(code, commercial_name),
         owner:inventory_owners(name, owner_type)
       )
-    `)
+    `;
+  const fallbackQuery = `
+      *,
+      supplier:suppliers(name),
+      items:purchase_order_items(
+        id,
+        product_id,
+        quantity,
+        received_quantity,
+        unit_price,
+        total_price,
+        product:products(code, commercial_name)
+      )
+    `;
+
+  const { data, error } = await supabase
+    .from('purchase_orders')
+    .select(detailedQuery)
     .order('created_at', { ascending: false });
   
+  const source = data || [];
+  if (error && (error.code === 'PGRST200' || error.code === '42P01')) {
+    const { data: fallbackData, error: fallbackError } = await supabase
+      .from('purchase_orders')
+      .select(fallbackQuery)
+      .order('created_at', { ascending: false });
+    if (fallbackError) {
+      console.error('Fallback purchase orders query failed:', fallbackError);
+      return [];
+    }
+    return (fallbackData || []).map((po) => ({
+      ...po,
+      supplier_name: (po as any).supplier?.name || 'Unknown Supplier',
+      items: ((po as any).items || []).map((item: any) => ({
+        id: item.id,
+        product_id: item.product_id,
+        product_name: item.product?.commercial_name || 'Unknown Product',
+        owner_id: null,
+        owner_name: null,
+        quantity: item.quantity,
+        received_quantity: item.received_quantity || 0,
+        unit_price: item.unit_price,
+        total_price: item.total_price
+      }))
+    }));
+  }
+
   if (error) throw error;
   
   // Transform the data to match frontend expectations
-  return data?.map(po => ({
+  return source.map(po => ({
     ...po,
     supplier_name: po.supplier?.name || 'Unknown Supplier',
     items: po.items?.map((item: any) => ({
