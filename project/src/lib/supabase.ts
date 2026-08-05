@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { Database } from '../types/supabase';
 import { toMoneyNumber } from '../utils/stockUtils';
 import type {
+  ActivityLog,
   DailyClosing,
   Expense,
   IncomingByProductSummary,
@@ -116,6 +117,30 @@ const ensureDefaultInventoryOwner = async (
 
 export const getInventoryOwners = async (): Promise<InventoryOwner[]> =>
   getInventoryOwnersWithClient(createServiceRoleClient());
+
+const recordActivity = async (
+  client: ReturnType<typeof createServiceRoleClient>,
+  activity: Omit<Database['public']['Tables']['activity_log']['Insert'], 'id' | 'created_at'>
+) => {
+  try {
+    const { data: authData } = await supabase.auth.getUser();
+    const payload: Database['public']['Tables']['activity_log']['Insert'] = {
+      user_id: activity.user_id ?? authData.user?.id ?? null,
+      action: activity.action,
+      entity_type: activity.entity_type,
+      entity_id: activity.entity_id,
+      details: activity.details ?? {},
+      ip_address: activity.ip_address ?? null
+    };
+
+    const { error } = await client.from('activity_log').insert(payload);
+    if (error) {
+      console.warn('Could not record activity:', error);
+    }
+  } catch (error) {
+    console.warn('Could not record activity:', error);
+  }
+};
 
 const syncProductOwnerStocks = async (
   productId: string,
@@ -1020,6 +1045,17 @@ export const createProduct = async (product: any) => {
     }
     
     const [withOwnerStocks] = await attachOwnerStocksToProducts([insertedProduct as Product], serviceRoleClient);
+    await recordActivity(serviceRoleClient, {
+      action: 'create_product',
+      entity_type: 'product',
+      entity_id: insertedProduct.id,
+      details: {
+        name: insertedProduct.commercial_name,
+        code: insertedProduct.code,
+        current_stock: withOwnerStocks?.current_stock ?? insertedProduct.current_stock,
+        owner_stocks: withOwnerStocks?.owner_stocks || []
+      }
+    });
     return withOwnerStocks;
   } catch (serviceErr) {
     console.error('Service role client failed:', serviceErr);
@@ -1071,6 +1107,12 @@ export const updateProduct = async (id: string, updates: Partial<Database['publi
     ...cleanedUpdates,
     updated_at: new Date().toISOString()
   };
+  const snapshotClient = createServiceRoleClient();
+  const { data: beforeProduct } = await snapshotClient
+    .from('products')
+    .select('id, code, commercial_name, current_stock, updated_at')
+    .eq('id', id)
+    .maybeSingle();
   
   console.log('Final update data:', updateData);
   
@@ -1121,10 +1163,24 @@ export const updateProduct = async (id: string, updates: Partial<Database['publi
       if ('current_stock' in updates) {
         console.log('Stock update confirmed - new current_stock:', updatedProduct.current_stock);
       }
-      await syncProductOwnerStocks(id, ownerStocks, serviceRoleClient);
-      const [withOwnerStocks] = await attachOwnerStocksToProducts([updatedProduct as Product], serviceRoleClient);
-      return withOwnerStocks;
-    }
+    await syncProductOwnerStocks(id, ownerStocks, serviceRoleClient);
+    const [withOwnerStocks] = await attachOwnerStocksToProducts([updatedProduct as Product], serviceRoleClient);
+    await recordActivity(serviceRoleClient, {
+      action: 'update_product',
+      entity_type: 'product',
+      entity_id: id,
+      details: {
+        name: withOwnerStocks?.commercial_name || updatedProduct.commercial_name,
+        code: withOwnerStocks?.code || updatedProduct.code,
+        before: beforeProduct || null,
+        after: {
+          current_stock: withOwnerStocks?.current_stock ?? updatedProduct.current_stock,
+          owner_stocks: withOwnerStocks?.owner_stocks || []
+        }
+      }
+    });
+    return withOwnerStocks;
+  }
     
     console.log('Product updated successfully (anon key):', data);
     if ('current_stock' in updates) {
@@ -1132,6 +1188,19 @@ export const updateProduct = async (id: string, updates: Partial<Database['publi
     }
     await syncProductOwnerStocks(id, ownerStocks);
     const [withOwnerStocks] = await attachOwnerStocksToProducts([data as Product]);
+    await recordActivity(createServiceRoleClient(), {
+      action: 'update_product',
+      entity_type: 'product',
+      entity_id: id,
+      details: {
+        name: withOwnerStocks?.commercial_name || data.commercial_name,
+        code: withOwnerStocks?.code || data.code,
+        after: {
+          current_stock: withOwnerStocks?.current_stock ?? data.current_stock,
+          owner_stocks: withOwnerStocks?.owner_stocks || []
+        }
+      }
+    });
     return withOwnerStocks;
   } catch (err) {
     console.error('Error in updateProduct:', err);
@@ -1184,10 +1253,24 @@ async function deleteProductWithClient(
 
 export const deleteProduct = async (id: string) => {
   console.log('deleteProduct called with id:', id);
+  const snapshotClient = createServiceRoleClient();
+  const { data: productSnapshot } = await snapshotClient
+    .from('products')
+    .select('id, code, commercial_name, current_stock')
+    .eq('id', id)
+    .maybeSingle();
 
   const result = await deleteProductWithClient(supabase, id);
   if (result === true) {
     console.log('Product deleted successfully (anon key)');
+    if (productSnapshot) {
+      await recordActivity(snapshotClient, {
+        action: 'delete_product',
+        entity_type: 'product',
+        entity_id: id,
+        details: productSnapshot
+      });
+    }
     return;
   }
   if (result !== false) {
@@ -1203,6 +1286,14 @@ export const deleteProduct = async (id: string) => {
   const serviceResult = await deleteProductWithClient(serviceRoleClient, id);
   if (serviceResult === true) {
     console.log('Product deleted successfully (service role)');
+    if (productSnapshot) {
+      await recordActivity(serviceRoleClient, {
+        action: 'delete_product',
+        entity_type: 'product',
+        entity_id: id,
+        details: productSnapshot
+      });
+    }
     return;
   }
   if (serviceResult === false) {
@@ -1214,13 +1305,26 @@ export const deleteProduct = async (id: string) => {
 };
 
 export const createStockMovement = async (movement: Omit<Database['public']['Tables']['stock_movements']['Insert'], 'id'>) => {
-  const { data, error } = await supabase
+  const client = createServiceRoleClient();
+  const { data, error } = await client
     .from('stock_movements')
     .insert(movement)
     .select()
     .single();
   
   if (error) throw error;
+  await recordActivity(client, {
+    action: 'create_stock_movement',
+    entity_type: 'stock_movement',
+    entity_id: data.id,
+    details: {
+      product_id: data.product_id,
+      movement_type: data.movement_type,
+      quantity: data.quantity,
+      reason: data.reason,
+      owner_id: data.owner_id || null
+    }
+  });
   return data;
 };
 
@@ -1352,6 +1456,18 @@ export const createOrder = async (
     await cleanupOrder();
     throw movementError;
   }
+
+  await recordActivity(client, {
+    action: 'create_sale',
+    entity_type: 'order',
+    entity_id: orderData.id,
+    details: {
+      order_number: orderData.order_number,
+      total_amount: orderData.total_amount,
+      items: orderItems.length,
+      customer_name: orderData.customer_name
+    }
+  });
 
   return orderData;
 };
@@ -1596,6 +1712,17 @@ export const updateOrderWithItems = async (
     }
   }
 
+  await recordActivity(client, {
+    action: 'update_sale',
+    entity_type: 'order',
+    entity_id: orderId,
+    details: {
+      order_number: existingOrder.order_number,
+      total_amount: updatedOrder.total_amount,
+      items: replacementItems.length
+    }
+  });
+
   const { data: updatedProducts, error: productRefreshError } = affectedProductIds.length > 0
     ? await client.from('products').select('*').in('id', affectedProductIds)
     : { data: [], error: null };
@@ -1641,6 +1768,18 @@ export const createPurchaseOrder = async (
     .insert(poItems);
 
   if (itemsError) throw itemsError;
+
+  await recordActivity(client, {
+    action: 'create_purchase_order',
+    entity_type: 'purchase_order',
+    entity_id: poData.id,
+    details: {
+      po_number: poData.po_number,
+      supplier_id: poData.supplier_id,
+      total_amount: poData.total_amount,
+      items: poItems.length
+    }
+  });
 
   return poData;
 };
@@ -1762,6 +1901,17 @@ export const receivePurchaseOrderStock = async (poId: string): Promise<{
     .in('id', productIds);
 
   if (productsError) throw productsError;
+
+  await recordActivity(client, {
+    action: 'receive_purchase_order',
+    entity_type: 'purchase_order',
+    entity_id: poId,
+    details: {
+      po_number: updatedPO.po_number,
+      items: validItems.length,
+      total_received: validItems.reduce((sum, item: any) => sum + Math.floor(Number(item.received_quantity || item.quantity || 0)), 0)
+    }
+  });
 
   return {
     purchaseOrder: {

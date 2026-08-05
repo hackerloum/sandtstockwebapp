@@ -182,11 +182,13 @@ function AppContent() {
         
         setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
         setSuccess(`Product "${product.commercial_name}" updated successfully!`);
+        await refreshActivityLog();
       } else {
         const newProduct = await createProduct(product);
         // Add the new product to the existing list
         setProducts(prev => [...prev, newProduct as Product]);
         setSuccess(`Product "${product.commercial_name}" created successfully!`);
+        await refreshActivityLog();
       }
       setEditingProduct(null);
       setActiveTab('products');
@@ -278,6 +280,7 @@ function AppContent() {
     try {
       const newMovement = await createStockMovement(movement);
       setMovements(prev => [...prev, newMovement]);
+      await refreshActivityLog();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add movement');
       throw err;
@@ -342,6 +345,7 @@ function AppContent() {
         const ownerDeltas = soldByOwner.get(product.id) || [];
         return ownerDeltas.reduce((current, delta) => applyOwnerStockChange(current, delta.ownerId, delta.quantity), product);
       }));
+      await refreshActivityLog();
       return savedOrder;
     } catch (err) {
       const message = getErrorMessage(err) || 'Failed to create order';
@@ -376,9 +380,11 @@ function AppContent() {
             return updated ? { ...product, ...updated } as Product : product;
           }));
         }
+        await refreshActivityLog();
       } else {
         const updatedOrder = await updateOrder(order.id, orderUpdate);
         setOrders(prev => prev.map(o => o.id === order.id ? { ...order, ...updatedOrder } : o));
+        await refreshActivityLog();
       }
       
       console.log('Order updated successfully');
@@ -403,6 +409,7 @@ function AppContent() {
         supplier_name: supplier?.name || 'Unknown Supplier',
         items
       }, ...prev]);
+      await refreshActivityLog();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create purchase order');
       throw err;
@@ -418,6 +425,7 @@ function AppContent() {
     setPurchaseOrders(prev => prev.map((current) => current.id === po.id ? result.purchaseOrder : current));
     const updated = new Map(result.products.map((product) => [product.id, product]));
     setProducts(prev => prev.map((product) => updated.get(product.id) || product));
+    await refreshActivityLog();
   };
 
   const handleDeletePurchaseOrder = (id: string) => {
@@ -430,6 +438,15 @@ function AppContent() {
       setIncomingByProduct(data);
     } catch {
       // Ignore refresh errors here to avoid blocking UI workflows.
+    }
+  };
+
+  const refreshActivityLog = async () => {
+    try {
+      const data = await getActivityLog();
+      setActivities(data);
+    } catch {
+      // Keep the app usable even if activity logging is temporarily unavailable.
     }
   };
 
@@ -925,6 +942,8 @@ function AppContent() {
         isOpen={isProductDetailOpen}
         onEdit={handleEditProduct}
         inventoryOwners={inventoryOwners}
+        movements={movements}
+        activities={activities}
         onClose={() => {
           setIsProductDetailOpen(false);
           setViewingProduct(null);

@@ -1,6 +1,6 @@
 import React from 'react';
 import { CalendarDays, Edit2, Package, Truck, Weight } from 'lucide-react';
-import { InventoryOwner, Product } from '../types';
+import { ActivityLog, InventoryOwner, Product, StockMovement } from '../types';
 import { formatCurrency, getStockStatus, getStatusText } from '../utils/stockUtils';
 import { Button } from './shared/Button';
 import { Modal } from './shared/Modal';
@@ -11,6 +11,8 @@ interface ProductDetailProps {
   onClose: () => void;
   onEdit?: (product: Product) => void;
   inventoryOwners: InventoryOwner[];
+  movements: StockMovement[];
+  activities: ActivityLog[];
 }
 
 interface ExtendedProduct extends Product {
@@ -50,7 +52,9 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   isOpen,
   onClose,
   onEdit,
-  inventoryOwners
+  inventoryOwners,
+  movements,
+  activities
 }) => {
   if (!product) return null;
 
@@ -64,6 +68,73 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const season = Array.isArray(product.season) && product.season.length ? product.season.join(', ') : 'Not set';
   const ownerStocks = (product.owner_stocks || []).filter((stock) => Number(stock.quantity || 0) > 0);
   const defaultOwner = inventoryOwners.find((owner) => owner.is_default) || inventoryOwners[0] || null;
+  const timeline = React.useMemo(() => {
+    const productMovements = movements
+      .filter((movement) => movement.product_id === product.id)
+      .slice()
+      .sort((a, b) => new Date(a.performed_at).getTime() - new Date(b.performed_at).getTime());
+
+    const productActivities = activities
+      .filter((activity) => activity.entity_type === 'product' && activity.entity_id === product.id)
+      .slice()
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+    const ownerName = (ownerId: string | null | undefined) =>
+      inventoryOwners.find((owner) => owner.id === ownerId)?.name || 'Owner';
+    const ownerType = (ownerId: string | null | undefined) =>
+      inventoryOwners.find((owner) => owner.id === ownerId)?.owner_type || 'person';
+
+    let total = 0;
+    const ownerTotals = new Map<string, number>();
+
+    const movementEntries = productMovements.map((movement) => {
+      const delta = movement.movement_type === 'in' ? movement.quantity : -movement.quantity;
+      total = Math.max(0, total + delta);
+      if (movement.owner_id) {
+        ownerTotals.set(movement.owner_id, Math.max(0, (ownerTotals.get(movement.owner_id) || 0) + delta));
+      }
+      return {
+        id: `movement-${movement.id}`,
+        kind: 'movement' as const,
+        at: movement.performed_at,
+        title: movement.movement_type === 'in' ? 'Stock received' : 'Stock reduced',
+        subtitle: movement.reason,
+        totalAfter: total,
+        delta,
+        ownerName: ownerName(movement.owner_id),
+        ownerType: ownerType(movement.owner_id),
+        ownerAfter: movement.owner_id ? ownerTotals.get(movement.owner_id) || 0 : null
+      };
+    });
+
+    const activityEntries = productActivities.map((activity) => {
+      const details = activity.details && typeof activity.details === 'object'
+        ? activity.details as Record<string, unknown>
+        : {};
+      const after = details.after && typeof details.after === 'object'
+        ? details.after as Record<string, unknown>
+        : {};
+      const afterStock = Number(after.current_stock ?? details.current_stock ?? product.current_stock);
+      return {
+        id: `activity-${activity.id}`,
+        kind: 'activity' as const,
+        at: activity.created_at,
+        title: activity.action.replace(/_/g, ' '),
+        subtitle: typeof activity.details === 'string'
+          ? activity.details
+          : `Product ${activity.action.replace(/_/g, ' ')}`,
+        totalAfter: Number.isFinite(afterStock) ? afterStock : null,
+        delta: null,
+        ownerName: null,
+        ownerType: null,
+        ownerAfter: null
+      };
+    });
+
+    return [...movementEntries, ...activityEntries]
+      .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+      .slice(0, 12);
+  }, [activities, inventoryOwners, movements, product.current_stock, product.id]);
 
   const handleEdit = () => {
     onClose();
@@ -185,6 +256,39 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             <DetailItem label="Current" value={`${stock} units`} />
             <DetailItem label="Maximum" value={maximum ? `${maximum} units` : 'Not set'} />
           </dl>
+        </section>
+
+        <section className="border-t border-gray-200 pt-5">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-gray-950">Timeline</h3>
+            <p className="text-xs text-gray-500">Latest stock and product changes</p>
+          </div>
+          <div className="mt-3 divide-y divide-gray-100 rounded-md border border-gray-200">
+            {timeline.length === 0 ? (
+              <div className="px-4 py-6 text-sm text-gray-500">No timeline entries yet.</div>
+            ) : timeline.map((entry) => (
+              <div key={entry.id} className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={`h-2 w-2 rounded-full ${entry.kind === 'movement' ? 'bg-emerald-500' : 'bg-blue-500'}`} />
+                    <p className="truncate text-sm font-medium text-gray-950">{entry.title}</p>
+                  </div>
+                  <p className="mt-1 break-words text-xs text-gray-500">{entry.subtitle}</p>
+                  {entry.kind === 'movement' && (
+                    <p className="mt-1 text-xs text-gray-500">
+                      {entry.ownerName} {entry.ownerAfter !== null ? `remaining ${entry.ownerAfter}` : ''} {entry.delta !== null ? `(${entry.delta > 0 ? '+' : ''}${entry.delta})` : ''}
+                    </p>
+                  )}
+                  {entry.kind === 'activity' && entry.totalAfter !== null && (
+                    <p className="mt-1 text-xs text-gray-500">Remaining stock after change: {entry.totalAfter}</p>
+                  )}
+                </div>
+                <time className="whitespace-nowrap text-xs text-gray-500" dateTime={entry.at}>
+                  {new Date(entry.at).toLocaleString()}
+                </time>
+              </div>
+            ))}
+          </div>
         </section>
 
         {product.product_type === 'Fragrance Bottles' && (

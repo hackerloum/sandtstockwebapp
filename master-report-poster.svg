@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
+  <rect width="1080" height="1080" fill="#F2EFE7"/>
+  <rect x="825" width="255" height="1080" fill="#175CFF"/>
+
+  <rect x="72" y="72" width="690" height="4" fill="#111111"/>
+  <text x="72" y="116" fill="#111111" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700" letter-spacing="4">EXECUTIVE INTELLIGENCE</text>
+  <text x="650" y="116" fill="#111111" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700" letter-spacing="2">VOL. 01</text>
+  <circle cx="785" cy="108" r="8" fill="#FF3B2F"/>
+
+  <text x="62" y="328" fill="#111111" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="170" font-weight="900" letter-spacing="-6">MASTER</text>
+  <text x="62" y="484" fill="#111111" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="170" font-weight="900" letter-spacing="-6">REPORT</text>
+
+  <text x="72" y="580" fill="#111111" font-family="Arial, Helvetica, sans-serif" font-size="38" font-weight="700" letter-spacing="-1">From raw data to</text>
+  <text x="72" y="628" fill="#175CFF" font-family="Arial, Helvetica, sans-serif" font-size="38" font-weight="700" letter-spacing="-1">decisive action.</text>
+
+  <g transform="translate(72 700)">
+    <line x1="0" y1="0" x2="690" y2="0" stroke="#111111" stroke-width="3"/>
+    <line x1="0" y1="72" x2="690" y2="72" stroke="#B1ADA3" stroke-width="1"/>
+    <line x1="0" y1="144" x2="690" y2="144" stroke="#B1ADA3" stroke-width="1"/>
+    <line x1="0" y1="216" x2="690" y2="216" stroke="#111111" stroke-width="3"/>
+    <line x1="138" y1="0" x2="138" y2="216" stroke="#B1ADA3" stroke-width="1"/>
+    <line x1="276" y1="0" x2="276" y2="216" stroke="#B1ADA3" stroke-width="1"/>
+    <line x1="414" y1="0" x2="414" y2="216" stroke="#B1ADA3" stroke-width="1"/>
+    <line x1="552" y1="0" x2="552" y2="216" stroke="#B1ADA3" stroke-width="1"/>
+    <polyline points="20,172 170,140 312,160 465,92 650,34" fill="none" stroke="#175CFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <g fill="#F2EFE7" stroke="#175CFF" stroke-width="5">
+      <circle cx="20" cy="172" r="9"/><circle cx="170" cy="140" r="9"/><circle cx="312" cy="160" r="9"/><circle cx="465" cy="92" r="9"/>
+    </g>
+    <circle cx="650" cy="34" r="10" fill="#FF3B2F"/>
+    <text x="0" y="258" fill="#111111" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700" letter-spacing="3">ANALYZE</text>
+    <text x="245" y="258" fill="#111111" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700" letter-spacing="3">UNDERSTAND</text>
+    <text x="620" y="258" fill="#111111" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700" letter-spacing="3">LEAD</text>
+  </g>
+
+  <line x1="72" y1="1000" x2="762" y2="1000" stroke="#111111" stroke-width="2"/>
+  <text x="72" y="1042" fill="#111111" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="700" letter-spacing="4">CLARITY / INSIGHT / IMPACT</text>
+
+  <g transform="translate(951 920) rotate(-90)">
+    <text x="0" y="0" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700" letter-spacing="5">MASTER REPORT — INTELLIGENCE, REFINED</text>
+  </g>
+  <text x="905" y="1040" fill="#FFFFFF" font-family="Arial Black, Arial, sans-serif" font-size="78" font-weight="900">01</text>
+</svg>
