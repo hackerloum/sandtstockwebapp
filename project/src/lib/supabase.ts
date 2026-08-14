@@ -13,6 +13,7 @@ import type {
   Product,
   ProductOwnerStock,
   PurchaseOrder,
+  StockMovement,
   UpcomingInvoice,
   UpcomingInvoiceLine,
   UpcomingInvoiceMatchStatus,
@@ -129,7 +130,7 @@ const recordActivity = async (
       action: activity.action,
       entity_type: activity.entity_type,
       entity_id: activity.entity_id,
-      details: activity.details ?? {},
+      details: JSON.parse(JSON.stringify(activity.details ?? {})),
       ip_address: activity.ip_address ?? null
     };
 
@@ -514,6 +515,7 @@ export const checkProductExists = async (code: string, excludeId?: string) => {
 };
 
 export const getStockMovements = async () => {
+  const client = createServiceRoleClient();
   const query = `
       *,
       product:products(code, commercial_name),
@@ -526,15 +528,15 @@ export const getStockMovements = async () => {
       batch:product_batches(batch_number)
     `;
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from('stock_movements')
     .select(query)
     .order('performed_at', { ascending: false });
   
-  if (!error) return data;
+  if (!error) return data ?? [];
 
   if (error.code === 'PGRST200' || error.code === '42P01') {
-    const { data: fallbackData, error: fallbackError } = await supabase
+    const { data: fallbackData, error: fallbackError } = await client
       .from('stock_movements')
       .select(fallbackQuery)
       .order('performed_at', { ascending: false });
@@ -542,7 +544,7 @@ export const getStockMovements = async () => {
       console.error('Fallback stock movements query failed:', fallbackError);
       return [];
     }
-    return fallbackData;
+    return fallbackData ?? [];
   }
 
   throw error;
@@ -2000,9 +2002,10 @@ export const ensureArgevilleSupplier = async () => {
   }
 };
 
-export const getActivityLog = async () => {
+export const getActivityLog = async (): Promise<ActivityLog[]> => {
   try {
-    const { data, error } = await supabase
+    const client = createServiceRoleClient();
+    const { data, error } = await client
       .from('activity_log')
       .select('*')
       .order('created_at', { ascending: false });
@@ -2011,11 +2014,69 @@ export const getActivityLog = async () => {
       console.error('Error fetching activity log:', error);
       return [];
     }
-    return data || [];
+    return (data || []) as ActivityLog[];
   } catch (error) {
     console.error('Error in getActivityLog:', error);
     return [];
   }
+};
+
+export const getProductTimeline = async (productId: string): Promise<{
+  movements: StockMovement[];
+  activities: ActivityLog[];
+}> => {
+  const client = createServiceRoleClient();
+  const movementSelect = `
+    *,
+    product:products(code, commercial_name),
+    batch:product_batches(batch_number),
+    owner:inventory_owners(name, owner_type)
+  `;
+  const movementFallback = `
+    *,
+    product:products(code, commercial_name),
+    batch:product_batches(batch_number)
+  `;
+
+  const [movementsResult, activitiesResult] = await Promise.all([
+    client
+      .from('stock_movements')
+      .select(movementSelect)
+      .eq('product_id', productId)
+      .order('performed_at', { ascending: false }),
+    client
+      .from('activity_log')
+      .select('*')
+      .eq('entity_id', productId)
+      .order('created_at', { ascending: false })
+  ]);
+
+  let movements = movementsResult.data || [];
+  if (movementsResult.error) {
+    if (movementsResult.error.code === 'PGRST200' || movementsResult.error.code === '42P01') {
+      const fallback = await client
+        .from('stock_movements')
+        .select(movementFallback)
+        .eq('product_id', productId)
+        .order('performed_at', { ascending: false });
+      if (fallback.error) {
+        console.error('Could not load product stock movements:', fallback.error);
+      } else {
+        movements = fallback.data || [];
+      }
+    } else {
+      console.error('Could not load product stock movements:', movementsResult.error);
+    }
+  }
+
+  if (activitiesResult.error) {
+    console.error('Could not load product activity:', activitiesResult.error);
+  }
+
+  return {
+    movements: (movements || []) as StockMovement[],
+    activities: (activitiesResult.data || []) as ActivityLog[]
+  };
 };
 
 const normalizeMoneyFields = <T extends Record<string, unknown>>(

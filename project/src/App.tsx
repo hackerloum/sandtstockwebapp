@@ -182,13 +182,13 @@ function AppContent() {
         
         setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
         setSuccess(`Product "${product.commercial_name}" updated successfully!`);
-        await refreshActivityLog();
+        await refreshTimelineSources();
       } else {
         const newProduct = await createProduct(product);
         // Add the new product to the existing list
         setProducts(prev => [...prev, newProduct as Product]);
         setSuccess(`Product "${product.commercial_name}" created successfully!`);
-        await refreshActivityLog();
+        await refreshTimelineSources();
       }
       setEditingProduct(null);
       setActiveTab('products');
@@ -280,7 +280,7 @@ function AppContent() {
     try {
       const newMovement = await createStockMovement(movement);
       setMovements(prev => [...prev, newMovement]);
-      await refreshActivityLog();
+      await refreshTimelineSources();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add movement');
       throw err;
@@ -345,7 +345,7 @@ function AppContent() {
         const ownerDeltas = soldByOwner.get(product.id) || [];
         return ownerDeltas.reduce((current, delta) => applyOwnerStockChange(current, delta.ownerId, delta.quantity), product);
       }));
-      await refreshActivityLog();
+      await refreshTimelineSources();
       return savedOrder;
     } catch (err) {
       const message = getErrorMessage(err) || 'Failed to create order';
@@ -380,11 +380,11 @@ function AppContent() {
             return updated ? { ...product, ...updated } as Product : product;
           }));
         }
-        await refreshActivityLog();
+        await refreshTimelineSources();
       } else {
         const updatedOrder = await updateOrder(order.id, orderUpdate);
         setOrders(prev => prev.map(o => o.id === order.id ? { ...order, ...updatedOrder } : o));
-        await refreshActivityLog();
+        await refreshTimelineSources();
       }
       
       console.log('Order updated successfully');
@@ -409,7 +409,7 @@ function AppContent() {
         supplier_name: supplier?.name || 'Unknown Supplier',
         items
       }, ...prev]);
-      await refreshActivityLog();
+      await refreshTimelineSources();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create purchase order');
       throw err;
@@ -425,7 +425,7 @@ function AppContent() {
     setPurchaseOrders(prev => prev.map((current) => current.id === po.id ? result.purchaseOrder : current));
     const updated = new Map(result.products.map((product) => [product.id, product]));
     setProducts(prev => prev.map((product) => updated.get(product.id) || product));
-    await refreshActivityLog();
+    await refreshTimelineSources();
   };
 
   const handleDeletePurchaseOrder = (id: string) => {
@@ -448,6 +448,19 @@ function AppContent() {
     } catch {
       // Keep the app usable even if activity logging is temporarily unavailable.
     }
+  };
+
+  const refreshStockMovements = async () => {
+    try {
+      const data = await getStockMovements();
+      setMovements(data);
+    } catch {
+      // Keep the current movement list if a refresh fails.
+    }
+  };
+
+  const refreshTimelineSources = async () => {
+    await Promise.all([refreshActivityLog(), refreshStockMovements()]);
   };
 
   const mainTabs = [
