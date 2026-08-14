@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { CalendarDays, Edit2, Package, Truck, Weight } from 'lucide-react';
 import { ActivityLog, InventoryOwner, Product, StockMovement } from '../types';
+import { getProductTimeline } from '../lib/supabase';
 import { formatCurrency, getStockStatus, getStatusText } from '../utils/stockUtils';
 import { Button } from './shared/Button';
 import { Modal } from './shared/Modal';
@@ -56,26 +57,53 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   movements,
   activities
 }) => {
-  if (!product) return null;
+  const [remoteMovements, setRemoteMovements] = useState<StockMovement[]>([]);
+  const [remoteActivities, setRemoteActivities] = useState<ActivityLog[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
 
-  const extendedProduct = product as ExtendedProduct;
-  const status = getStockStatus(product);
-  const stock = Number(product.current_stock || 0);
-  const minimum = Number(product.min_stock || 0);
-  const maximum = Number(product.max_stock || 0);
-  const stockValue = stock * Number(product.price || 0);
-  const stockPercent = maximum > 0 ? Math.min(Math.max((stock / maximum) * 100, 0), 100) : 0;
-  const season = Array.isArray(product.season) && product.season.length ? product.season.join(', ') : 'Not set';
-  const ownerStocks = (product.owner_stocks || []).filter((stock) => Number(stock.quantity || 0) > 0);
-  const defaultOwner = inventoryOwners.find((owner) => owner.is_default) || inventoryOwners[0] || null;
-  const timeline = React.useMemo(() => {
-    const productMovements = movements
-      .filter((movement) => movement.product_id === product.id)
+  useEffect(() => {
+    if (!isOpen || !product?.id) {
+      setRemoteMovements([]);
+      setRemoteActivities([]);
+      return;
+    }
+
+    let cancelled = false;
+    setTimelineLoading(true);
+    getProductTimeline(product.id)
+      .then((result) => {
+        if (cancelled) return;
+        setRemoteMovements(result.movements);
+        setRemoteActivities(result.activities);
+      })
+      .catch((error) => {
+        if (!cancelled) console.error('Could not load product timeline:', error);
+      })
+      .finally(() => {
+        if (!cancelled) setTimelineLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, product?.id]);
+
+  const timeline = useMemo(() => {
+    if (!product) return [];
+
+    const byMovementId = new Map<string, StockMovement>();
+    [...movements, ...remoteMovements]
+      .filter((movement) => String(movement.product_id) === String(product.id))
+      .forEach((movement) => byMovementId.set(String(movement.id), movement));
+    const productMovements = [...byMovementId.values()]
       .slice()
       .sort((a, b) => new Date(a.performed_at).getTime() - new Date(b.performed_at).getTime());
 
-    const productActivities = activities
-      .filter((activity) => activity.entity_type === 'product' && activity.entity_id === product.id)
+    const byActivityId = new Map<string, ActivityLog>();
+    [...activities, ...remoteActivities]
+      .filter((activity) => String(activity.entity_id) === String(product.id))
+      .forEach((activity) => byActivityId.set(String(activity.id), activity));
+    const productActivities = [...byActivityId.values()]
       .slice()
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
@@ -131,10 +159,56 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       };
     });
 
-    return [...movementEntries, ...activityEntries]
+    const lifecycleEntries: typeof activityEntries = [];
+    if (product.created_at) {
+      lifecycleEntries.push({
+        id: `created-${product.id}`,
+        kind: 'activity' as const,
+        at: product.created_at,
+        title: 'Product created',
+        subtitle: product.commercial_name,
+        totalAfter: null,
+        delta: null,
+        ownerName: null,
+        ownerType: null,
+        ownerAfter: null
+      });
+    }
+    if (product.updated_at && product.updated_at !== product.created_at) {
+      lifecycleEntries.push({
+        id: `updated-${product.id}-${product.updated_at}`,
+        kind: 'activity' as const,
+        at: product.updated_at,
+        title: 'Product updated',
+        subtitle: product.commercial_name,
+        totalAfter: Number(product.current_stock || 0),
+        delta: null,
+        ownerName: null,
+        ownerType: null,
+        ownerAfter: null
+      });
+    }
+
+    const combined = [...movementEntries, ...activityEntries];
+    const source = combined.length > 0 ? combined : lifecycleEntries;
+
+    return source
       .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
       .slice(0, 12);
-  }, [activities, inventoryOwners, movements, product.current_stock, product.id]);
+  }, [activities, inventoryOwners, movements, product, remoteActivities, remoteMovements]);
+
+  if (!product) return null;
+
+  const extendedProduct = product as ExtendedProduct;
+  const status = getStockStatus(product);
+  const stock = Number(product.current_stock || 0);
+  const minimum = Number(product.min_stock || 0);
+  const maximum = Number(product.max_stock || 0);
+  const stockValue = stock * Number(product.price || 0);
+  const stockPercent = maximum > 0 ? Math.min(Math.max((stock / maximum) * 100, 0), 100) : 0;
+  const season = Array.isArray(product.season) && product.season.length ? product.season.join(', ') : 'Not set';
+  const ownerStocks = (product.owner_stocks || []).filter((stock) => Number(stock.quantity || 0) > 0);
+  const defaultOwner = inventoryOwners.find((owner) => owner.is_default) || inventoryOwners[0] || null;
 
   const handleEdit = () => {
     onClose();
@@ -265,7 +339,9 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
           </div>
           <div className="mt-3 divide-y divide-gray-100 rounded-md border border-gray-200">
             {timeline.length === 0 ? (
-              <div className="px-4 py-6 text-sm text-gray-500">No timeline entries yet.</div>
+              <div className="px-4 py-6 text-sm text-gray-500">
+                {timelineLoading ? 'Loading timeline…' : 'No timeline entries yet.'}
+              </div>
             ) : timeline.map((entry) => (
               <div key={entry.id} className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
                 <div className="min-w-0">
