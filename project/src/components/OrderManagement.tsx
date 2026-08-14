@@ -19,6 +19,9 @@ import {
   formatCurrency,
   formatDate,
   generateOrderNumber,
+  getOwnerStockQuantity,
+  getSellableStock,
+  pickSaleOwnerId,
   resolveOrderGrandTotal,
   resolveOrderItemsForDisplay
 } from '../utils/stockUtils';
@@ -336,7 +339,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ order, products, inventoryOwners,
     const queryTerms = normalizeSearchValue(productQuery).split(/\s+/).filter(Boolean);
 
     return products
-      .filter((product) => product.current_stock > 0)
+      .filter((product) => getSellableStock(product) > 0)
       .filter((product) => {
         const searchableText = [
           product.commercial_name,
@@ -357,21 +360,24 @@ const OrderForm: React.FC<OrderFormProps> = ({ order, products, inventoryOwners,
   const totalUnits = orderItems.reduce((sum, item) => sum + item.quantity, 0);
   const resolveOwner = (ownerId?: string | null) => inventoryOwners.find((owner) => owner.id === ownerId) || defaultOwner || null;
 
-  const addProduct = (product: Product) => {
+  const addProduct = (product: Product, ownerId?: string) => {
     setOrderItems((current) => {
-      const ownerId = defaultOwner?.id || '';
-      const ownerName = defaultOwner?.name || null;
-      const existing = current.find((item) => item.product_id === product.id && (item.owner_id || '') === ownerId);
+      const resolvedOwnerId = pickSaleOwnerId(product, inventoryOwners, ownerId);
+      const owner = resolveOwner(resolvedOwnerId);
+      const available = getOwnerStockQuantity(product, resolvedOwnerId, defaultOwner?.id);
+      if (available <= 0) return current;
+      const existing = current.find((item) => item.product_id === product.id && (item.owner_id || '') === resolvedOwnerId);
       if (existing) {
-        return current.map((item) => item.product_id === product.id && (item.owner_id || '') === ownerId
-          ? { ...item, quantity: item.quantity + 1, total_price: (item.quantity + 1) * item.unit_price }
+        const nextQuantity = Math.min(existing.quantity + 1, available);
+        return current.map((item) => item.product_id === product.id && (item.owner_id || '') === resolvedOwnerId
+          ? { ...item, quantity: nextQuantity, total_price: nextQuantity * item.unit_price }
           : item);
       }
       return [...current, {
         product_id: product.id,
         product_name: product.commercial_name,
-        owner_id: ownerId || null,
-        owner_name: ownerName,
+        owner_id: resolvedOwnerId || null,
+        owner_name: owner?.name || null,
         quantity: 1,
         unit_price: product.price,
         total_price: product.price
@@ -381,16 +387,31 @@ const OrderForm: React.FC<OrderFormProps> = ({ order, products, inventoryOwners,
 
   const updateQuantity = (index: number, nextQuantity: number) => {
     if (nextQuantity < 1) return;
-    setOrderItems((current) => current.map((item, itemIndex) => itemIndex === index
-      ? { ...item, quantity: nextQuantity, total_price: nextQuantity * item.unit_price }
-      : item));
+    setOrderItems((current) => current.map((item, itemIndex) => {
+      if (itemIndex !== index) return item;
+      const product = products.find((candidate) => candidate.id === item.product_id);
+      const available = getOwnerStockQuantity(product, item.owner_id, defaultOwner?.id);
+      const quantity = Math.min(nextQuantity, available);
+      if (quantity < 1) return item;
+      return { ...item, quantity, total_price: quantity * item.unit_price };
+    }));
   };
 
   const updateItemOwner = (index: number, ownerId: string) => {
     setOrderItems((current) => {
-      const next = current.map((item, itemIndex) => itemIndex === index
-        ? { ...item, owner_id: ownerId || null, owner_name: resolveOwner(ownerId)?.name || null }
-        : item);
+      const next = current.map((item, itemIndex) => {
+        if (itemIndex !== index) return item;
+        const product = products.find((candidate) => candidate.id === item.product_id);
+        const available = getOwnerStockQuantity(product, ownerId, defaultOwner?.id);
+        const quantity = Math.max(1, Math.min(item.quantity, Math.max(available, 1)));
+        return {
+          ...item,
+          owner_id: ownerId || null,
+          owner_name: resolveOwner(ownerId)?.name || null,
+          quantity,
+          total_price: quantity * item.unit_price
+        };
+      });
       const target = next[index];
       if (!target) return current;
       const duplicateIndex = next.findIndex((item, itemIndex) => itemIndex !== index && item.product_id === target.product_id && (item.owner_id || '') === (target.owner_id || ''));
@@ -414,6 +435,22 @@ const OrderForm: React.FC<OrderFormProps> = ({ order, products, inventoryOwners,
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (orderItems.length === 0 || isSaving) return;
+    const stockError = orderItems.reduce<string | null>((error, item) => {
+      if (error) return error;
+      const product = products.find((candidate) => candidate.id === item.product_id);
+      const available = getOwnerStockQuantity(product, item.owner_id, defaultOwner?.id);
+      if (!item.owner_id || available <= 0) {
+        return `${item.product_name} has no stock for ${item.owner_name || 'the selected owner'}.`;
+      }
+      if (item.quantity > available) {
+        return `${item.product_name} has only ${available} units for ${item.owner_name || 'the selected owner'}.`;
+      }
+      return null;
+    }, null);
+    if (stockError) {
+      setSaveError(stockError);
+      return;
+    }
     setSaveError(null);
     setIsSaving(true);
     const printWindow = order ? null : window.open('', '_blank');
@@ -495,23 +532,56 @@ const OrderForm: React.FC<OrderFormProps> = ({ order, products, inventoryOwners,
                   <p className="mt-2 text-sm font-medium text-gray-900">No available products found</p>
                 </div>
               ) : productResults.map((product) => {
-                const inCart = orderItems.find((item) => item.product_id === product.id)?.quantity || 0;
+                const sellable = getSellableStock(product);
+                const ownerStocks = (product.owner_stocks || [])
+                  .map((stock) => ({
+                    ...stock,
+                    quantity: getOwnerStockQuantity(product, stock.owner_id, defaultOwner?.id)
+                  }))
+                  .filter((stock) => stock.quantity > 0);
+                const inCart = orderItems
+                  .filter((item) => item.product_id === product.id)
+                  .reduce((sum, item) => sum + item.quantity, 0);
                 return (
-                  <button
+                  <div
                     key={product.id}
-                    type="button"
-                    onClick={() => addProduct(product)}
-                    className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
+                    className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 px-4 py-3 hover:bg-gray-50"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-gray-950 sm:text-base">{product.commercial_name}</p>
-                      <p className="mt-0.5 text-xs text-gray-500">{product.code} · {product.current_stock} available</p>
+                      <button
+                        type="button"
+                        onClick={() => addProduct(product)}
+                        className="w-full text-left"
+                      >
+                        <p className="truncate text-sm font-medium text-gray-950 sm:text-base">{product.commercial_name}</p>
+                        <p className="mt-0.5 text-xs text-gray-500">{product.code} · {sellable} available</p>
+                      </button>
+                      {ownerStocks.length > 0 && (
+                        <p className="mt-1 flex flex-wrap gap-1.5">
+                          {ownerStocks.map((stock) => (
+                            <button
+                              key={stock.owner_id}
+                              type="button"
+                              onClick={() => addProduct(product, stock.owner_id)}
+                              className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-0.5 text-[11px] font-medium text-gray-700 hover:border-emerald-300 hover:bg-emerald-50"
+                            >
+                              <span>{stock.owner?.name || inventoryOwners.find((owner) => owner.id === stock.owner_id)?.name || 'Owner'}</span>
+                              <span className="font-semibold">{stock.quantity}</span>
+                            </button>
+                          ))}
+                        </p>
+                      )}
                     </div>
                     <p className="whitespace-nowrap text-sm font-semibold text-gray-900">{formatCurrency(product.price)}</p>
-                    <span className={`flex h-9 w-9 items-center justify-center rounded-md ${inCart ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-950 text-white'}`}>
+                    <button
+                      type="button"
+                      onClick={() => addProduct(product)}
+                      className={`flex h-9 w-9 items-center justify-center rounded-md ${inCart ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-950 text-white'}`}
+                      title="Add to sale"
+                    >
                       {inCart ? <span className="text-sm font-bold">{inCart}</span> : <Plus className="h-4 w-4" />}
-                    </span>
-                  </button>
+                    </button>
+                  </div>
                 );
               })}
             </div>
@@ -533,15 +603,18 @@ const OrderForm: React.FC<OrderFormProps> = ({ order, products, inventoryOwners,
                 {orderItems.map((item, index) => {
                   const product = products.find((candidate) => candidate.id === item.product_id);
                   const selectedOwner = resolveOwner(item.owner_id);
-                  const ownerStock = product?.owner_stocks?.find((stock) => stock.owner_id === (item.owner_id || selectedOwner?.id || ''));
-                  const available = Number(ownerStock?.quantity ?? product?.current_stock ?? 0);
+                  const available = getOwnerStockQuantity(product, item.owner_id || selectedOwner?.id, defaultOwner?.id);
+                  const ownerOptions = inventoryOwners.filter((owner) => {
+                    if (owner.id === (item.owner_id || selectedOwner?.id)) return true;
+                    return getOwnerStockQuantity(product, owner.id, defaultOwner?.id) > 0;
+                  });
                   return (
                   <div key={`${item.product_id}-${item.owner_id || 'owner'}-${index}`} className="rounded-md border border-gray-200 bg-white p-3">
                     <div className="flex items-start gap-3">
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-gray-950">{item.product_name}</p>
                         <p className="mt-0.5 text-xs text-gray-500">
-                          {selectedOwner?.name || item.owner_name || 'Company'} • {available} available
+                          {selectedOwner?.name || item.owner_name || 'Owner'} • {available} available
                         </p>
                         <p className="mt-0.5 text-xs text-gray-500">{formatCurrency(item.unit_price)} each</p>
                       </div>
@@ -555,10 +628,15 @@ const OrderForm: React.FC<OrderFormProps> = ({ order, products, inventoryOwners,
                           onChange={(event) => updateItemOwner(index, event.target.value)}
                           className="h-9 w-full rounded-md border border-gray-300 bg-white px-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
                         >
-                          <option value="">Select owner</option>
-                          {inventoryOwners.map((owner) => (
-                            <option key={owner.id} value={owner.id}>{owner.name}</option>
-                          ))}
+                          {ownerOptions.length === 0 && <option value="">No owner stock</option>}
+                          {ownerOptions.map((owner) => {
+                            const ownerAvailable = getOwnerStockQuantity(product, owner.id, defaultOwner?.id);
+                            return (
+                              <option key={owner.id} value={owner.id} disabled={ownerAvailable <= 0 && owner.id !== item.owner_id}>
+                                {owner.name} ({ownerAvailable})
+                              </option>
+                            );
+                          })}
                         </select>
                       </div>
                       <div className="flex h-9 items-center rounded-md border border-gray-300 bg-white">
