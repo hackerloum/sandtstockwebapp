@@ -632,6 +632,58 @@ export const getStockStatus = (product: Product) => {
   return 'ok';
 };
 
+type OwnerStockSource = {
+  current_stock?: number | string;
+  owner_stocks?: Array<{ owner_id?: string | null; quantity?: number | string }>;
+};
+
+const ownerQuantity = (value: unknown) => Math.max(0, Math.floor(Number(value) || 0));
+
+export const getOwnerStockQuantity = (
+  product: OwnerStockSource | null | undefined,
+  ownerId?: string | null,
+  defaultOwnerId?: string | null
+): number => {
+  if (!product || !ownerId) return 0;
+  const stocks = product.owner_stocks || [];
+  if (stocks.length > 0) {
+    const row = stocks.find((stock) => stock.owner_id === ownerId);
+    return ownerQuantity(row?.quantity);
+  }
+  if (defaultOwnerId && ownerId !== defaultOwnerId) return 0;
+  return ownerQuantity(product.current_stock);
+};
+
+export const getSellableStock = (product: OwnerStockSource | null | undefined): number => {
+  if (!product) return 0;
+  const owned = (product.owner_stocks || [])
+    .map((stock) => ownerQuantity(stock.quantity))
+    .filter((quantity) => quantity > 0);
+  if (owned.length > 0) return owned.reduce((sum, quantity) => sum + quantity, 0);
+  return ownerQuantity(product.current_stock);
+};
+
+export const pickSaleOwnerId = (
+  product: OwnerStockSource,
+  inventoryOwners: Array<{ id: string; is_default?: boolean }>,
+  preferredOwnerId?: string | null
+): string => {
+  const defaultOwnerId = inventoryOwners.find((owner) => owner.is_default)?.id || inventoryOwners[0]?.id || '';
+  const ranked = (product.owner_stocks || [])
+    .map((stock) => ({
+      owner_id: String(stock.owner_id || ''),
+      quantity: ownerQuantity(stock.quantity)
+    }))
+    .filter((stock) => stock.owner_id && stock.quantity > 0)
+    .sort((left, right) => right.quantity - left.quantity);
+
+  if (preferredOwnerId && ranked.some((stock) => stock.owner_id === preferredOwnerId)) {
+    return preferredOwnerId;
+  }
+  if (ranked[0]?.owner_id) return ranked[0].owner_id;
+  return defaultOwnerId;
+};
+
 /**
  * Parse money values from DB/API (number, string with commas, numeric strings). Never returns NaN.
  */
