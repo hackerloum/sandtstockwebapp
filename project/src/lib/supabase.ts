@@ -514,6 +514,7 @@ export const checkProductExists = async (code: string, excludeId?: string) => {
 };
 
 export const getStockMovements = async () => {
+  const client = createServiceRoleClient();
   const query = `
       *,
       product:products(code, commercial_name),
@@ -526,15 +527,15 @@ export const getStockMovements = async () => {
       batch:product_batches(batch_number)
     `;
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from('stock_movements')
     .select(query)
     .order('performed_at', { ascending: false });
   
-  if (!error) return data;
+  if (!error) return data ?? [];
 
   if (error.code === 'PGRST200' || error.code === '42P01') {
-    const { data: fallbackData, error: fallbackError } = await supabase
+    const { data: fallbackData, error: fallbackError } = await client
       .from('stock_movements')
       .select(fallbackQuery)
       .order('performed_at', { ascending: false });
@@ -542,7 +543,7 @@ export const getStockMovements = async () => {
       console.error('Fallback stock movements query failed:', fallbackError);
       return [];
     }
-    return fallbackData;
+    return fallbackData ?? [];
   }
 
   throw error;
@@ -2002,7 +2003,8 @@ export const ensureArgevilleSupplier = async () => {
 
 export const getActivityLog = async () => {
   try {
-    const { data, error } = await supabase
+    const client = createServiceRoleClient();
+    const { data, error } = await client
       .from('activity_log')
       .select('*')
       .order('created_at', { ascending: false });
