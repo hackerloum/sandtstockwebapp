@@ -2001,7 +2001,7 @@ export const ensureArgevilleSupplier = async () => {
   }
 };
 
-export const getActivityLog = async () => {
+export const getActivityLog = async (): Promise<ActivityLog[]> => {
   try {
     const client = createServiceRoleClient();
     const { data, error } = await client
@@ -2013,7 +2013,7 @@ export const getActivityLog = async () => {
       console.error('Error fetching activity log:', error);
       return [];
     }
-    return data || [];
+    return (data || []) as ActivityLog[];
   } catch (error) {
     console.error('Error in getActivityLog:', error);
     return [];
