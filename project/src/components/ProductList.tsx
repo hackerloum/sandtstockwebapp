@@ -253,10 +253,45 @@ export const ProductList: React.FC<ProductListProps> = ({
     if (!window.confirm(`Set stock to 0 for ${staleProducts.length} products not updated in the last 7 days?`)) return;
 
     setZeroingStaleStock(true);
+    let updatedCount = 0;
+    const errors: string[] = [];
+
     try {
       for (const product of staleProducts) {
-        const updated = await updateProduct(product.id, { current_stock: 0, updated_by: user?.id || null });
-        if (updated && onUpdateProduct) onUpdateProduct({ ...product, ...updated, current_stock: 0 } as Product);
+        try {
+          const zeroedOwnerStocks = (product.owner_stocks || []).map((stock) => ({
+            ...stock,
+            quantity: 0
+          }));
+
+          const updated = await updateProduct(product.id, {
+            current_stock: 0,
+            owner_stocks: zeroedOwnerStocks,
+            updated_by: user?.id || null
+          });
+
+          if (updated && onUpdateProduct) {
+            onUpdateProduct({
+              ...product,
+              ...updated,
+              current_stock: 0,
+              owner_stocks: updated.owner_stocks || zeroedOwnerStocks
+            } as Product);
+          }
+          updatedCount += 1;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          errors.push(`${product.commercial_name || product.code}: ${message}`);
+          console.error('Failed to zero stale stock for product:', product.id, error);
+        }
+      }
+
+      if (updatedCount > 0 && errors.length === 0) {
+        window.alert(`Set stock to 0 for ${updatedCount} products.`);
+      } else if (updatedCount > 0) {
+        window.alert(`Updated ${updatedCount} products, but ${errors.length} failed. Check console for details.`);
+      } else {
+        window.alert(`Could not update stale stock.\n${errors.slice(0, 3).join('\n')}`);
       }
     } finally {
       setZeroingStaleStock(false);

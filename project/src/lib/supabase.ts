@@ -1065,15 +1065,28 @@ export const createProduct = async (product: any) => {
   }
 };
 
-export const updateProduct = async (id: string, updates: Partial<Database['public']['Tables']['products']['Update']>) => {
+export const updateProduct = async (id: string, updates: Partial<Database['public']['Tables']['products']['Update']> & { owner_stocks?: ProductOwnerStock[] }) => {
   console.log('updateProduct called with id:', id, 'updates:', updates);
-  const ownerStocks = Array.isArray((updates as { owner_stocks?: unknown }).owner_stocks)
+  let ownerStocks = Array.isArray((updates as { owner_stocks?: unknown }).owner_stocks)
     ? (updates as { owner_stocks: ProductOwnerStock[] }).owner_stocks
     : undefined;
   
   // Special handling for current_stock updates
   if ('current_stock' in updates) {
     console.log('Updating current_stock from:', updates.current_stock, 'for product:', id);
+  }
+
+  // If stock is forced to 0 without owner_stocks, also zero every owner balance
+  if (
+    ownerStocks === undefined &&
+    'current_stock' in updates &&
+    Number((updates as { current_stock?: number }).current_stock) === 0
+  ) {
+    const [existing] = await attachOwnerStocksToProducts([{ id }], createServiceRoleClient());
+    ownerStocks = (existing?.owner_stocks || []).map((stock) => ({
+      ...stock,
+      quantity: 0
+    }));
   }
   
   // Clean up the updates object - convert empty strings to null for UUID fields
@@ -1086,11 +1099,26 @@ export const updateProduct = async (id: string, updates: Partial<Database['publi
     );
   }
   
-  // Convert empty strings to null for UUID fields
-  if (cleanedUpdates.brand_id === '') cleanedUpdates.brand_id = null;
-  if (cleanedUpdates.supplier_id === '') cleanedUpdates.supplier_id = null;
-  if (cleanedUpdates.created_by === '') cleanedUpdates.created_by = null;
-  if (cleanedUpdates.updated_by === '') cleanedUpdates.updated_by = null;
+  // Convert empty/invalid values to null for UUID fields (local auth uses ids like "1")
+  const toUuidOrNull = (value: unknown) => {
+    if (value === null || value === undefined || value === '') return null;
+    const text = String(value);
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)
+      ? text
+      : null;
+  };
+  if ('brand_id' in cleanedUpdates) {
+    cleanedUpdates.brand_id = toUuidOrNull(cleanedUpdates.brand_id) as typeof cleanedUpdates.brand_id;
+  }
+  if ('supplier_id' in cleanedUpdates) {
+    cleanedUpdates.supplier_id = toUuidOrNull(cleanedUpdates.supplier_id) as typeof cleanedUpdates.supplier_id;
+  }
+  if ('created_by' in cleanedUpdates) {
+    cleanedUpdates.created_by = toUuidOrNull(cleanedUpdates.created_by) as typeof cleanedUpdates.created_by;
+  }
+  if ('updated_by' in cleanedUpdates) {
+    cleanedUpdates.updated_by = toUuidOrNull(cleanedUpdates.updated_by) as typeof cleanedUpdates.updated_by;
+  }
   
   // Convert empty strings to null for optional text fields
   if (cleanedUpdates.concentration === '') cleanedUpdates.concentration = null;
