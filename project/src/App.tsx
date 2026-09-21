@@ -191,6 +191,7 @@ function AppContent() {
         await refreshTimelineSources();
       }
       setEditingProduct(null);
+      setShouldRestoreProductListScroll(true);
       setActiveTab('products');
       
       // Clear success message after 5 seconds
@@ -500,14 +501,26 @@ function AppContent() {
     if (typeof window === 'undefined') return;
 
     const restoreScroll = () => {
-      const maxAttempts = 6;
+      const maxAttempts = 12;
       const tolerance = 2;
       const listElement = getProductListContainer();
+
+      // Wait for ProductList to remount (search/filters restored from session)
+      if (!listElement) {
+        if (restoreAttemptsRef.current < maxAttempts) {
+          restoreAttemptsRef.current += 1;
+          requestAnimationFrame(restoreScroll);
+          return;
+        }
+        restoreAttemptsRef.current = 0;
+        setShouldRestoreProductListScroll(false);
+        return;
+      }
+
       let targetScrollY = window.scrollY;
       let usedAnchor = false;
 
       if (
-        listElement &&
         productListScrollState.anchorId &&
         typeof productListScrollState.anchorOffset === 'number'
       ) {
@@ -518,6 +531,11 @@ function AppContent() {
           const rowDocTop = rowElement.getBoundingClientRect().top + window.scrollY;
           targetScrollY = Math.max(0, rowDocTop - productListScrollState.anchorOffset);
           usedAnchor = true;
+        } else if (restoreAttemptsRef.current < maxAttempts) {
+          // Filtered list may still be painting; retry until the edited row is present
+          restoreAttemptsRef.current += 1;
+          requestAnimationFrame(restoreScroll);
+          return;
         }
       }
 
@@ -529,7 +547,7 @@ function AppContent() {
       window.scrollTo(0, targetScrollY);
 
       const currentAnchorDelta = usedAnchor
-        ? (listElement?.querySelector(`[data-row-id="${productListScrollState.anchorId}"]`) as HTMLElement | null)?.getBoundingClientRect().top - productListScrollState.anchorOffset
+        ? (listElement.querySelector(`[data-row-id="${productListScrollState.anchorId}"]`) as HTMLElement | null)?.getBoundingClientRect().top - productListScrollState.anchorOffset
         : 0;
 
       const isSettled =
@@ -825,6 +843,7 @@ function AppContent() {
             suppliers={suppliers}
             inventoryOwners={inventoryOwners}
             onBack={() => {
+              setShouldRestoreProductListScroll(true);
               setActiveTab('products');
               setEditingProduct(null);
             }}

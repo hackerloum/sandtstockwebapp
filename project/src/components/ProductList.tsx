@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowDownAZ,
   ArrowUpAZ,
@@ -44,6 +44,49 @@ interface ExtendedProduct extends Product {
 type SortField = 'commercial_name' | 'current_stock' | 'price' | 'updated_at';
 type SortDirection = 'asc' | 'desc';
 
+type ProductListViewState = {
+  searchTerm: string;
+  statusFilter: string;
+  categoryFilter: string;
+  productTypeFilter: string;
+  brandFilter: string;
+  sortField: SortField;
+  sortDirection: SortDirection;
+  showFilters: boolean;
+};
+
+const PRODUCT_LIST_VIEW_KEY = 'productListViewState';
+
+const defaultViewState: ProductListViewState = {
+  searchTerm: '',
+  statusFilter: 'all',
+  categoryFilter: 'all',
+  productTypeFilter: 'all',
+  brandFilter: 'all',
+  sortField: 'commercial_name',
+  sortDirection: 'asc',
+  showFilters: false
+};
+
+const loadViewState = (): ProductListViewState => {
+  if (typeof window === 'undefined') return defaultViewState;
+  try {
+    const raw = window.sessionStorage.getItem(PRODUCT_LIST_VIEW_KEY);
+    if (!raw) return defaultViewState;
+    const parsed = JSON.parse(raw) as Partial<ProductListViewState>;
+    return {
+      ...defaultViewState,
+      ...parsed,
+      sortField: (['commercial_name', 'current_stock', 'price', 'updated_at'] as SortField[]).includes(parsed.sortField as SortField)
+        ? (parsed.sortField as SortField)
+        : defaultViewState.sortField,
+      sortDirection: parsed.sortDirection === 'desc' ? 'desc' : 'asc'
+    };
+  } catch {
+    return defaultViewState;
+  }
+};
+
 const statusOptions = [
   { value: 'all', label: 'All stock' },
   { value: 'ok', label: 'In stock' },
@@ -83,14 +126,15 @@ export const ProductList: React.FC<ProductListProps> = ({
 }) => {
   const { hasPermission, user } = useAuth();
   const extendedProducts = products as ExtendedProduct[];
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [categoryFilter, setCategoryFilter] = useState('all');
-  const [productTypeFilter, setProductTypeFilter] = useState('all');
-  const [brandFilter, setBrandFilter] = useState('all');
-  const [sortField, setSortField] = useState<SortField>('commercial_name');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
-  const [showFilters, setShowFilters] = useState(false);
+  const initialViewState = useMemo(() => loadViewState(), []);
+  const [searchTerm, setSearchTerm] = useState(initialViewState.searchTerm);
+  const [statusFilter, setStatusFilter] = useState(initialViewState.statusFilter);
+  const [categoryFilter, setCategoryFilter] = useState(initialViewState.categoryFilter);
+  const [productTypeFilter, setProductTypeFilter] = useState(initialViewState.productTypeFilter);
+  const [brandFilter, setBrandFilter] = useState(initialViewState.brandFilter);
+  const [sortField, setSortField] = useState<SortField>(initialViewState.sortField);
+  const [sortDirection, setSortDirection] = useState<SortDirection>(initialViewState.sortDirection);
+  const [showFilters, setShowFilters] = useState(initialViewState.showFilters);
   const [showTools, setShowTools] = useState(false);
   const [showBulkPriceUpdate, setShowBulkPriceUpdate] = useState(false);
   const [zeroingStaleStock, setZeroingStaleStock] = useState(false);
@@ -99,6 +143,29 @@ export const ProductList: React.FC<ProductListProps> = ({
     percentage: 0,
     fixedAmount: 0
   });
+
+  useEffect(() => {
+    const nextState: ProductListViewState = {
+      searchTerm,
+      statusFilter,
+      categoryFilter,
+      productTypeFilter,
+      brandFilter,
+      sortField,
+      sortDirection,
+      showFilters
+    };
+    window.sessionStorage.setItem(PRODUCT_LIST_VIEW_KEY, JSON.stringify(nextState));
+  }, [
+    brandFilter,
+    categoryFilter,
+    productTypeFilter,
+    searchTerm,
+    showFilters,
+    sortDirection,
+    sortField,
+    statusFilter
+  ]);
 
   const categories = useMemo(
     () => Array.from(new Set(extendedProducts.map((product) => product.category).filter(Boolean))).sort(),
