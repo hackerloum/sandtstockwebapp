@@ -41,7 +41,6 @@ import {
   getInventoryOwners,
   receivePurchaseOrderStock,
   ensureArgevilleSupplier,
-  testProductVisibility
 } from './lib/supabase';
 
 type ActiveTab =
@@ -109,14 +108,10 @@ function AppContent() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        
-        // Ensure Argeville supplier exists first
-        await ensureArgevilleSupplier();
-        
-        // Test product visibility
-        console.log('App: Testing product visibility...');
-        await testProductVisibility();
-        
+
+        // Warm supplier in the background; don't block first paint on it
+        void ensureArgevilleSupplier();
+
         const [
           productsData,
           movementsData,

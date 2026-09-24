@@ -25,9 +25,23 @@ const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 const supabaseServiceRoleKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxqa3Z3YWR1cXZhY21ydnljc2hqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MzkxMTcxOCwiZXhwIjoyMDY5NDg3NzE4fQ.yTH08Ylnmyh7Dcgy8QaQgABZrTG1LPylK1ET_MGLvlw';
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
-const createServiceRoleClient = () => createClient<Database>(supabaseUrl, supabaseServiceRoleKey);
+
+// Reuse one service-role client to avoid multiple GoTrueClient instances
+let serviceRoleClient: ReturnType<typeof createClient<Database>> | null = null;
+const createServiceRoleClient = () => {
+  if (!serviceRoleClient) {
+    serviceRoleClient = createClient<Database>(supabaseUrl, supabaseServiceRoleKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false
+      }
+    });
+  }
+  return serviceRoleClient;
+};
 
 const ownerSelect = 'id, name, owner_type, is_default, is_active';
+const OWNER_STOCK_IN_CHUNK = 40;
 
 const getDefaultOwnerIdFromRows = (owners: InventoryOwner[]) =>
   owners.find((owner) => owner.is_default)?.id || owners[0]?.id || null;
@@ -54,12 +68,38 @@ const attachOwnerStocksToProducts = async <T extends { id: string; current_stock
   if (!products?.length) return [];
 
   const productIds = products.map((product) => product.id).filter(Boolean);
-  const { data: ownerStocks, error } = await client
-    .from('product_owner_stocks')
-    .select(`product_id, owner_id, quantity, updated_at, owner:inventory_owners(${ownerSelect})`)
-    .in('product_id', productIds);
+  if (!productIds.length) {
+    return products.map((product) => ({ ...product, owner_stocks: [] }));
+  }
 
-  if (error) {
+  let ownerStockRows: unknown[] = [];
+
+  try {
+    if (productIds.length === 1) {
+      const { data, error } = await client
+        .from('product_owner_stocks')
+        .select(`product_id, owner_id, quantity, updated_at, owner:inventory_owners(${ownerSelect})`)
+        .eq('product_id', productIds[0]);
+      if (error) throw error;
+      ownerStockRows = data || [];
+    } else if (productIds.length <= OWNER_STOCK_IN_CHUNK) {
+      const { data, error } = await client
+        .from('product_owner_stocks')
+        .select(`product_id, owner_id, quantity, updated_at, owner:inventory_owners(${ownerSelect})`)
+        .in('product_id', productIds);
+      if (error) throw error;
+      ownerStockRows = data || [];
+    } else {
+      // Avoid huge `in.(uuid,uuid,...)` URLs that break browsers/service workers.
+      // Fetch all owner stocks once, then attach client-side.
+      const { data, error } = await client
+        .from('product_owner_stocks')
+        .select(`product_id, owner_id, quantity, updated_at, owner:inventory_owners(${ownerSelect})`);
+      if (error) throw error;
+      const wanted = new Set(productIds);
+      ownerStockRows = (data || []).filter((row) => wanted.has(String((row as { product_id?: string }).product_id || '')));
+    }
+  } catch (error) {
     console.warn('Could not load owner stock balances:', error);
     return products.map((product) => ({
       ...product,
@@ -68,7 +108,7 @@ const attachOwnerStocksToProducts = async <T extends { id: string; current_stock
   }
 
   const byProduct = new Map<string, ProductOwnerStock[]>();
-  normalizeOwnerStocks(ownerStocks as unknown[]).forEach((stock) => {
+  normalizeOwnerStocks(ownerStockRows).forEach((stock) => {
     if (!byProduct.has(stock.product_id)) byProduct.set(stock.product_id, []);
     byProduct.get(stock.product_id)!.push(stock);
   });
@@ -230,184 +270,49 @@ function mapOrderItemRowFromQuery(item: Record<string, unknown>) {
 }
 
 // Helper functions for data access
+const PRODUCT_LIST_SELECT = `
+  id,
+  code,
+  item_number,
+  commercial_name,
+  brand_id,
+  category,
+  product_type,
+  concentration,
+  size,
+  current_stock,
+  min_stock,
+  max_stock,
+  reorder_point,
+  price,
+  supplier_id,
+  fragrance_notes,
+  gender,
+  season,
+  is_tester,
+  gross_weight,
+  tare_weight,
+  net_weight,
+  created_at,
+  updated_at,
+  brand:brands(name),
+  supplier:suppliers(name)
+`;
+
 export const getProducts = async () => {
   try {
-    console.log('getProducts: Starting to fetch products...');
-    
-    // First, let's check if we have an authenticated user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    console.log('getProducts: Current user:', user?.id, user?.email);
-    
-    if (authError) {
-      console.error('getProducts: Auth error:', authError);
-    }
-    
-    // Test 1: Get a simple count first
-    const { count: simpleCount, error: countError } = await supabase
+    const client = createServiceRoleClient();
+    const { data, error } = await client
       .from('products')
-      .select('*', { count: 'exact', head: true });
-    
-    console.log('getProducts: Simple count result:', simpleCount, 'Error:', countError);
-    
-    // Test 2: Get products with minimal fields first
-    const { data: minimalData, error: minimalError } = await supabase
-      .from('products')
-      .select('id, code, commercial_name');
-    
-    console.log('getProducts: Minimal data count:', minimalData?.length || 0, 'Error:', minimalError);
-    
-    // Test 3: Get full data with joins
-    const { data, error } = await supabase
-      .from('products')
-      .select(`
-        id,
-        code,
-        item_number,
-        commercial_name,
-        brand_id,
-        category,
-        product_type,
-        concentration,
-        size,
-        current_stock,
-        min_stock,
-        max_stock,
-        reorder_point,
-        price,
-        supplier_id,
-        fragrance_notes,
-        gender,
-        season,
-        is_tester,
-        gross_weight,
-        tare_weight,
-        net_weight,
-        created_at,
-        updated_at,
-        brand:brands(name),
-        supplier:suppliers(name)
-      `);
-    
+      .select(PRODUCT_LIST_SELECT)
+      .order('commercial_name', { ascending: true });
+
     if (error) {
       console.error('getProducts: Error fetching products:', error);
-      console.error('getProducts: Error details:', {
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        code: error.code
-      });
       return [];
     }
-    
-    console.log('getProducts: Raw data from Supabase:', data);
-    console.log('getProducts: Products count:', data?.length || 0);
-    console.log('getProducts: Count comparison - Simple:', simpleCount, 'Minimal:', minimalData?.length, 'Full:', data?.length);
-    
-    // Log each product for debugging
-    if (data && data.length > 0) {
-      console.log('getProducts: Individual products:');
-      data.forEach((product, index) => {
-        console.log(`Product ${index + 1}:`, {
-          id: product.id,
-          code: product.code,
-          commercial_name: product.commercial_name,
-          category: product.category,
-          product_type: product.product_type,
-          brand: product.brand,
-          supplier: product.supplier,
-          hasRequiredFields: {
-            id: !!product.id,
-            code: !!product.code,
-            commercial_name: !!product.commercial_name,
-            category: !!product.category,
-            product_type: !!product.product_type
-          }
-        });
-      });
-    }
-    
-    // If no products found with anon key, try with service role
-    if (!data || data.length === 0) {
-      console.log('getProducts: No products found with anon key, trying service role...');
-      const serviceRoleClient = createClient(
-        supabaseUrl,
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxqa3Z3YWR1cXZhY21ydnljc2hqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MzkxMTcxOCwiZXhwIjoyMDY5NDg3NzE4fQ.yTH08Ylnmyh7Dcgy8QaQgABZrTG1LPylK1ET_MGLvlw'
-      );
-      
-      // Test service role with simple count first
-      const { count: serviceCount, error: serviceCountError } = await serviceRoleClient
-        .from('products')
-        .select('*', { count: 'exact', head: true });
-      
-      console.log('getProducts: Service role count:', serviceCount, 'Error:', serviceCountError);
-      
-      const { data: serviceData, error: serviceError } = await serviceRoleClient
-        .from('products')
-        .select(`
-          id,
-          code,
-          item_number,
-          commercial_name,
-          brand_id,
-          category,
-          product_type,
-          concentration,
-          size,
-          current_stock,
-          min_stock,
-          max_stock,
-          reorder_point,
-          price,
-          supplier_id,
-          fragrance_notes,
-          gender,
-          season,
-          is_tester,
-          gross_weight,
-          tare_weight,
-          net_weight,
-          created_at,
-          updated_at,
-          brand:brands(name),
-          supplier:suppliers(name)
-        `);
-      
-      if (serviceError) {
-        console.error('getProducts: Service role fetch error:', serviceError);
-      } else {
-        console.log('getProducts: Service role products:', serviceData);
-        console.log('getProducts: Service role products count:', serviceData?.length || 0);
-        console.log('getProducts: Service role count comparison - Count:', serviceCount, 'Data:', serviceData?.length);
-        
-        // Log each service role product for debugging
-        if (serviceData && serviceData.length > 0) {
-          console.log('getProducts: Service role individual products:');
-          serviceData.forEach((product, index) => {
-            console.log(`Service Product ${index + 1}:`, {
-              id: product.id,
-              code: product.code,
-              commercial_name: product.commercial_name,
-              category: product.category,
-              product_type: product.product_type,
-              brand: product.brand,
-              supplier: product.supplier,
-              hasRequiredFields: {
-                id: !!product.id,
-                code: !!product.code,
-                commercial_name: !!product.commercial_name,
-                category: !!product.category,
-                product_type: !!product.product_type
-              }
-            });
-          });
-        }
-        
-        // Return service role data instead of empty array
-        return await attachOwnerStocksToProducts(serviceData as Product[], serviceRoleClient);
-      }
-    }
-    
-    return await attachOwnerStocksToProducts(data as Product[]);
+
+    return await attachOwnerStocksToProducts((data || []) as Product[], client);
   } catch (error) {
     console.error('getProducts: Error in getProducts:', error);
     return [];
@@ -1985,25 +1890,23 @@ export const getSuppliers = async () => {
 
 export const ensureArgevilleSupplier = async () => {
   try {
-    // Check if Argeville supplier exists
-    const { data: existingSupplier, error: selectError } = await supabase
+    const client = createServiceRoleClient();
+    const { data: existingSupplier, error: selectError } = await client
       .from('suppliers')
       .select('id')
       .eq('name', 'Argeville')
-      .single();
+      .maybeSingle();
 
-    if (selectError && selectError.code !== 'PGRST116') {
+    if (selectError) {
       console.error('Error checking for Argeville supplier:', selectError);
       return null;
     }
 
     if (existingSupplier) {
-      console.log('Argeville supplier found:', existingSupplier.id);
       return existingSupplier;
     }
 
-    // Create Argeville supplier if it doesn't exist (without created_by/updated_by)
-    const { data: newSupplier, error: insertError } = await supabase
+    const { data: newSupplier, error: insertError } = await client
       .from('suppliers')
       .insert({
         name: 'Argeville',
@@ -2014,7 +1917,7 @@ export const ensureArgevilleSupplier = async () => {
         payment_terms: 'Net 30',
         lead_time: 14
       })
-      .select()
+      .select('id')
       .single();
 
     if (insertError) {
@@ -2022,7 +1925,6 @@ export const ensureArgevilleSupplier = async () => {
       return null;
     }
 
-    console.log('Argeville supplier created:', newSupplier.id);
     return newSupplier;
   } catch (error) {
     console.error('Error in ensureArgevilleSupplier:', error);

@@ -48,23 +48,17 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         navigateFallback: '/index.html',
+        // Never cache Supabase API calls — large query URLs break NetworkFirst/Cache.put
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/ljkvwaduqvacmrvycshj\.supabase\.co\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'supabase-api',
-              expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 60 * 60,
-              },
-              networkTimeoutSeconds: 10,
-            },
+            handler: 'NetworkOnly',
+            method: 'GET',
           },
         ],
       },
       devOptions: {
-        enabled: true,
+        enabled: false,
       },
     }),
   ],
