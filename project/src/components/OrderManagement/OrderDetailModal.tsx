@@ -219,6 +219,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   <div>
                     <p className="font-medium">{item.product_name}</p>
                     <p className="text-sm text-gray-600">
+                      {item.owner_name ? `Stock owner: ${item.owner_name} · ` : ''}
                       Quantity: {item.quantity} × {formatCurrency(item.unit_price)}
                     </p>
                   </div>

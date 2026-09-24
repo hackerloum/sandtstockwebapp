@@ -793,7 +793,10 @@ const OrderDetailModal: React.FC<OrderDetailModalProps> = ({ order, products, on
                 <div key={item.key} className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 px-4 py-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-gray-950">{item.product_name}</p>
-                    <p className="mt-0.5 text-xs text-gray-500">{item.quantity} x {formatCurrency(item.unit_price)}</p>
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      {item.owner_name ? `${item.owner_name} · ` : ''}
+                      {item.quantity} x {formatCurrency(item.unit_price)}
+                    </p>
                   </div>
                   <p className="text-sm font-semibold text-gray-950">{formatCurrency(item.total_price)}</p>
                 </div>

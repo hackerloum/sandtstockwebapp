@@ -101,6 +101,7 @@ export const generateOrderPDF = (order: Order, products: Product[]) => {
   if (displayItems.length > 0) {
     const tableData = displayItems.map(item => [
       item.product_name,
+      item.owner_name || '—',
       item.quantity.toString(),
       formatCurrency(item.unit_price),
       formatCurrency(item.total_price)
@@ -108,7 +109,7 @@ export const generateOrderPDF = (order: Order, products: Product[]) => {
     
     autoTable(doc, {
       startY: currentY,
-      head: [['Product', 'Quantity', 'Unit Price', 'Total']],
+      head: [['Product', 'Stock Owner', 'Quantity', 'Unit Price', 'Total']],
       body: tableData,
       theme: 'grid',
       headStyles: {
@@ -125,10 +126,11 @@ export const generateOrderPDF = (order: Order, products: Product[]) => {
         cellPadding: 3
       },
       columnStyles: {
-        0: { cellWidth: 80 }, // Product name
-        1: { cellWidth: 25, halign: 'center' }, // Quantity
-        2: { cellWidth: 30, halign: 'right' }, // Unit price
-        3: { cellWidth: 30, halign: 'right' }  // Total
+        0: { cellWidth: 58 }, // Product name
+        1: { cellWidth: 28 }, // Stock owner
+        2: { cellWidth: 22, halign: 'center' }, // Quantity
+        3: { cellWidth: 28, halign: 'right' }, // Unit price
+        4: { cellWidth: 28, halign: 'right' }  // Total
       }
     });
     
@@ -339,9 +341,10 @@ export const generateBulkOrdersPDF = (orders: Order[], products: Product[]) => {
     // Add order items summary
     const bulkLines = resolveOrderItemsForDisplay(order, products);
     if (bulkLines.length > 0) {
-      const itemSummary = bulkLines.map(item => 
-        `${item.product_name} (${item.quantity} × ${formatCurrency(item.unit_price)})`
-      ).join(', ');
+      const itemSummary = bulkLines.map(item => {
+        const ownerLabel = item.owner_name ? ` [${item.owner_name}]` : '';
+        return `${item.product_name}${ownerLabel} (${item.quantity} × ${formatCurrency(item.unit_price)})`;
+      }).join(', ');
       
       const itemLines = doc.splitTextToSize(`Items: ${itemSummary}`, contentWidth);
       doc.text(itemLines, margin, currentY);

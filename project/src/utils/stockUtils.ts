@@ -868,6 +868,8 @@ export type ResolvedOrderLine = {
   key: string;
   product_id: string;
   product_name: string;
+  owner_id: string | null;
+  owner_name: string | null;
   quantity: number;
   unit_price: number;
   total_price: number;
@@ -1054,10 +1056,27 @@ export function resolveOrderItemsForDisplay(order: Order, products: Product[]): 
       }
     }
 
+    const owner_id = r.owner_id != null && String(r.owner_id).trim()
+      ? String(r.owner_id).trim()
+      : null;
+    let owner_name =
+      typeof r.owner_name === 'string' && r.owner_name.trim()
+        ? r.owner_name.trim()
+        : null;
+    if (!owner_name) {
+      const embeddedOwner = Array.isArray(row.owner) ? row.owner[0] : row.owner;
+      if (embeddedOwner && typeof embeddedOwner === 'object') {
+        const name = String((embeddedOwner as Record<string, unknown>).name ?? '').trim();
+        if (name) owner_name = name;
+      }
+    }
+
     return {
       key: (r.id && String(r.id)) || `${product_id || 'line'}-${index}`,
       product_id,
       product_name,
+      owner_id,
+      owner_name,
       quantity,
       unit_price,
       total_price
