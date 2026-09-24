@@ -138,22 +138,21 @@ export const ProductList: React.FC<ProductListProps> = ({
   const [showFilters, setShowFilters] = useState(initialViewState.showFilters);
   const [showTools, setShowTools] = useState(false);
   const [showBulkPriceUpdate, setShowBulkPriceUpdate] = useState(false);
-  const [showBulkStockUpdate, setShowBulkStockUpdate] = useState(false);
-  const [updatingOwnerStock, setUpdatingOwnerStock] = useState(false);
+  const [showAddStock, setShowAddStock] = useState(false);
+  const [savingAddStock, setSavingAddStock] = useState(false);
   const [zeroingStaleStock, setZeroingStaleStock] = useState(false);
   const [bulkPriceUpdate, setBulkPriceUpdate] = useState({
     updateType: 'percentage' as 'percentage' | 'fixed',
     percentage: 0,
     fixedAmount: 0
   });
-  const [bulkStockUpdate, setBulkStockUpdate] = useState({
+  const [addStockForm, setAddStockForm] = useState({
+    productId: '',
     ownerId: '',
-    mode: 'add' as 'add' | 'set',
-    quantity: 0,
-    scope: 'filtered' as 'filtered' | 'all',
+    quantity: 1,
     productSearch: ''
   });
-  const [selectedStockProductIds, setSelectedStockProductIds] = useState<string[]>([]);
+  const [addStockError, setAddStockError] = useState<string | null>(null);
 
   useEffect(() => {
     const nextState: ProductListViewState = {
@@ -403,175 +402,136 @@ export const ProductList: React.FC<ProductListProps> = ({
   const ownerOptions = useMemo(
     () => inventoryOwners.map((owner) => ({
       value: owner.id,
-      label: `${owner.name}${owner.owner_type === 'company' ? ' (Company)' : ''}`
+      label: owner.name
     })),
     [inventoryOwners]
   );
 
-  const bulkStockCandidates = useMemo(() => {
-    const base = bulkStockUpdate.scope === 'filtered' ? filteredProducts : extendedProducts;
-    const term = bulkStockUpdate.productSearch.trim().toLowerCase();
-    if (!term) return base;
-    return base.filter((product) => {
-      const haystack = [
-        product.commercial_name,
-        product.code,
-        product.item_number,
-        product.brand?.name,
-        product.brand_id
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return haystack.includes(term);
-    });
-  }, [bulkStockUpdate.productSearch, bulkStockUpdate.scope, extendedProducts, filteredProducts]);
-
-  const openBulkStockUpdate = () => {
-    const preferredOwner =
-      inventoryOwners.find((owner) => /thabit/i.test(owner.name)) ||
-      inventoryOwners.find((owner) => owner.is_default) ||
-      inventoryOwners[0] ||
-      null;
-
-    setBulkStockUpdate({
-      ownerId: preferredOwner?.id || '',
-      mode: 'add',
-      quantity: 0,
-      scope: hasActiveFilters ? 'filtered' : 'all',
-      productSearch: ''
-    });
-    setSelectedStockProductIds(
-      (hasActiveFilters ? filteredProducts : extendedProducts).map((product) => product.id)
+  const defaultOwnerId = useMemo(() => {
+    return (
+      inventoryOwners.find((owner) => owner.is_default)?.id ||
+      inventoryOwners.find((owner) => /company/i.test(owner.name))?.id ||
+      inventoryOwners[0]?.id ||
+      ''
     );
+  }, [inventoryOwners]);
+
+  const addStockProductMatches = useMemo(() => {
+    const term = addStockForm.productSearch.trim().toLowerCase();
+    if (!term) return [];
+    return extendedProducts
+      .filter((product) => {
+        const haystack = [product.commercial_name, product.code, product.item_number]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(term);
+      })
+      .slice(0, 8);
+  }, [addStockForm.productSearch, extendedProducts]);
+
+  const selectedAddStockProduct = useMemo(
+    () => extendedProducts.find((product) => product.id === addStockForm.productId) || null,
+    [addStockForm.productId, extendedProducts]
+  );
+
+  const openAddStock = (product?: ExtendedProduct) => {
+    setAddStockError(null);
+    setAddStockForm({
+      productId: product?.id || '',
+      ownerId: defaultOwnerId,
+      quantity: 1,
+      productSearch: product ? `${product.commercial_name} (${product.code})` : ''
+    });
     setShowTools(false);
-    setShowBulkStockUpdate(true);
+    setShowAddStock(true);
   };
 
-  useEffect(() => {
-    if (!showBulkStockUpdate) return;
-    setSelectedStockProductIds(bulkStockCandidates.map((product) => product.id));
-  }, [bulkStockCandidates, showBulkStockUpdate]);
-
-  const toggleStockProduct = (productId: string) => {
-    setSelectedStockProductIds((current) => (
-      current.includes(productId)
-        ? current.filter((id) => id !== productId)
-        : [...current, productId]
-    ));
-  };
-
-  const handleBulkOwnerStockUpdate = async () => {
+  const handleAddStock = async () => {
     if (!hasPermission('edit_product')) {
-      window.alert('You do not have permission to update stock.');
+      setAddStockError('You do not have permission to add stock.');
       return;
     }
 
-    const owner = inventoryOwners.find((item) => item.id === bulkStockUpdate.ownerId);
+    const product = selectedAddStockProduct;
+    const owner = inventoryOwners.find((item) => item.id === addStockForm.ownerId);
+    const quantity = Math.floor(Number(addStockForm.quantity));
+
+    if (!product) {
+      setAddStockError('Choose the product first.');
+      return;
+    }
     if (!owner) {
-      window.alert('Select Company, Thabit, or another stock owner.');
+      setAddStockError('Choose who this stock belongs to (Company or Thabit).');
+      return;
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setAddStockError('Enter how many units to add.');
       return;
     }
 
-    const quantity = Math.floor(Number(bulkStockUpdate.quantity));
-    if (!Number.isFinite(quantity) || quantity < 0) {
-      window.alert('Enter a valid quantity (0 or more).');
-      return;
-    }
-    if (bulkStockUpdate.mode === 'add' && quantity === 0) {
-      window.alert('Enter how many units to add.');
-      return;
-    }
-    if (!selectedStockProductIds.length) {
-      window.alert('Select at least one product.');
-      return;
-    }
-
-    const targets = extendedProducts.filter((product) => selectedStockProductIds.includes(product.id));
-    const actionLabel = bulkStockUpdate.mode === 'add'
-      ? `add ${quantity} to ${owner.name}`
-      : `set ${owner.name} stock to ${quantity}`;
-
-    if (!window.confirm(`${actionLabel} for ${targets.length} product${targets.length === 1 ? '' : 's'}?`)) {
-      return;
-    }
-
-    setUpdatingOwnerStock(true);
-    let updatedCount = 0;
-    const errors: string[] = [];
+    setSavingAddStock(true);
+    setAddStockError(null);
 
     try {
-      for (const product of targets) {
-        try {
-          const nextOwnerStocks: ProductOwnerStock[] = [...(product.owner_stocks || [])];
-          const existingIndex = nextOwnerStocks.findIndex((stock) => stock.owner_id === owner.id);
-          const currentOwnerQty = existingIndex >= 0 ? Number(nextOwnerStocks[existingIndex].quantity || 0) : 0;
-          const nextOwnerQty = bulkStockUpdate.mode === 'add'
-            ? Math.max(0, currentOwnerQty + quantity)
-            : Math.max(0, quantity);
+      const nextOwnerStocks: ProductOwnerStock[] = [...(product.owner_stocks || [])];
+      const existingIndex = nextOwnerStocks.findIndex((stock) => stock.owner_id === owner.id);
+      const currentOwnerQty = existingIndex >= 0 ? Number(nextOwnerStocks[existingIndex].quantity || 0) : 0;
+      const nextOwnerQty = currentOwnerQty + quantity;
 
-          if (existingIndex >= 0) {
-            nextOwnerStocks[existingIndex] = {
-              ...nextOwnerStocks[existingIndex],
-              quantity: nextOwnerQty,
-              owner: {
-                id: owner.id,
-                name: owner.name,
-                owner_type: owner.owner_type,
-                is_default: owner.is_default
-              }
-            };
-          } else {
-            nextOwnerStocks.push({
-              product_id: product.id,
-              owner_id: owner.id,
-              quantity: nextOwnerQty,
-              owner: {
-                id: owner.id,
-                name: owner.name,
-                owner_type: owner.owner_type,
-                is_default: owner.is_default
-              }
-            });
+      if (existingIndex >= 0) {
+        nextOwnerStocks[existingIndex] = {
+          ...nextOwnerStocks[existingIndex],
+          quantity: nextOwnerQty,
+          owner: {
+            id: owner.id,
+            name: owner.name,
+            owner_type: owner.owner_type,
+            is_default: owner.is_default
           }
-
-          const nextTotal = nextOwnerStocks.reduce(
-            (sum, stock) => sum + Math.max(0, Math.floor(Number(stock.quantity) || 0)),
-            0
-          );
-
-          const updated = await updateProduct(product.id, {
-            current_stock: nextTotal,
-            owner_stocks: nextOwnerStocks,
-            updated_by: user?.id || null
-          });
-
-          if (updated && onUpdateProduct) {
-            onUpdateProduct({
-              ...product,
-              ...updated,
-              current_stock: updated.current_stock ?? nextTotal,
-              owner_stocks: updated.owner_stocks || nextOwnerStocks
-            } as Product);
-          }
-          updatedCount += 1;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'Unknown error';
-          errors.push(`${product.commercial_name || product.code}: ${message}`);
-          console.error('Failed owner stock update for product:', product.id, error);
-        }
-      }
-
-      if (updatedCount > 0 && errors.length === 0) {
-        window.alert(`Updated ${owner.name} stock for ${updatedCount} products.`);
-        setShowBulkStockUpdate(false);
-      } else if (updatedCount > 0) {
-        window.alert(`Updated ${updatedCount} products, but ${errors.length} failed. Check console for details.`);
+        };
       } else {
-        window.alert(`Could not update stock.\n${errors.slice(0, 3).join('\n')}`);
+        nextOwnerStocks.push({
+          product_id: product.id,
+          owner_id: owner.id,
+          quantity: nextOwnerQty,
+          owner: {
+            id: owner.id,
+            name: owner.name,
+            owner_type: owner.owner_type,
+            is_default: owner.is_default
+          }
+        });
       }
+
+      const nextTotal = nextOwnerStocks.reduce(
+        (sum, stock) => sum + Math.max(0, Math.floor(Number(stock.quantity) || 0)),
+        0
+      );
+
+      const updated = await updateProduct(product.id, {
+        current_stock: nextTotal,
+        owner_stocks: nextOwnerStocks,
+        updated_by: user?.id || null
+      });
+
+      if (updated && onUpdateProduct) {
+        onUpdateProduct({
+          ...product,
+          ...updated,
+          current_stock: updated.current_stock ?? nextTotal,
+          owner_stocks: updated.owner_stocks || nextOwnerStocks
+        } as Product);
+      }
+
+      setShowAddStock(false);
+      window.alert(`Added ${quantity} to ${owner.name} for ${product.commercial_name}.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not add stock.';
+      setAddStockError(message);
+      console.error('Failed to add stock:', error);
     } finally {
-      setUpdatingOwnerStock(false);
+      setSavingAddStock(false);
     }
   };
 
@@ -587,15 +547,26 @@ export const ProductList: React.FC<ProductListProps> = ({
         <Eye className="h-4 w-4" />
       </button>
       {hasPermission('edit_product') && (
-        <button
-          type="button"
-          onClick={() => onEditProduct(product)}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900"
-          title="Edit product"
-          aria-label={`Edit ${product.commercial_name}`}
-        >
-          <Edit2 className="h-4 w-4" />
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={() => openAddStock(product)}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-emerald-600 hover:bg-emerald-50 hover:text-emerald-800"
+            title="Add stock"
+            aria-label={`Add stock to ${product.commercial_name}`}
+          >
+            <Boxes className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onEditProduct(product)}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+            title="Edit product"
+            aria-label={`Edit ${product.commercial_name}`}
+          >
+            <Edit2 className="h-4 w-4" />
+          </button>
+        </>
       )}
       {hasPermission('delete_product') && (
         <button
@@ -616,8 +587,17 @@ export const ProductList: React.FC<ProductListProps> = ({
       <PageHeader
         title="Products"
         subtitle={`${products.length} products in inventory`}
-        actions={hasPermission('add_product') ? (
-          <Button icon={<Plus className="h-4 w-4" />} onClick={onAddProduct}>Add product</Button>
+        actions={(hasPermission('edit_product') || hasPermission('add_product')) ? (
+          <div className="flex items-center gap-2">
+            {hasPermission('edit_product') && (
+              <Button variant="outline" icon={<Boxes className="h-4 w-4" />} onClick={() => openAddStock()}>
+                Add stock
+              </Button>
+            )}
+            {hasPermission('add_product') && (
+              <Button icon={<Plus className="h-4 w-4" />} onClick={onAddProduct}>Add product</Button>
+            )}
+          </div>
         ) : undefined}
       />
 
@@ -706,8 +686,8 @@ export const ProductList: React.FC<ProductListProps> = ({
                     {hasPermission('edit_product') && (
                       <>
                         <div className="my-1 border-t border-gray-200" />
-                        <button type="button" onClick={openBulkStockUpdate} className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
-                          <Boxes className="h-4 w-4 text-gray-500" /> Update stock by owner
+                        <button type="button" onClick={() => openAddStock()} className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                          <Boxes className="h-4 w-4 text-gray-500" /> Add stock
                         </button>
                         <button type="button" onClick={() => setShowBulkPriceUpdate(true)} className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
                           <Package className="h-4 w-4 text-gray-500" /> Update prices
@@ -906,139 +886,98 @@ export const ProductList: React.FC<ProductListProps> = ({
       </Modal>
 
       <Modal
-        isOpen={showBulkStockUpdate}
-        onClose={() => !updatingOwnerStock && setShowBulkStockUpdate(false)}
-        title="Update stock by owner"
-        size="lg"
+        isOpen={showAddStock}
+        onClose={() => !savingAddStock && setShowAddStock(false)}
+        title="Add stock"
+        size="sm"
         footer={(
           <>
-            <Button variant="outline" disabled={updatingOwnerStock} onClick={() => setShowBulkStockUpdate(false)}>Cancel</Button>
-            <Button disabled={updatingOwnerStock || !ownerOptions.length} onClick={handleBulkOwnerStockUpdate}>
-              {updatingOwnerStock ? 'Updating...' : `Update ${selectedStockProductIds.length} products`}
+            <Button variant="outline" disabled={savingAddStock} onClick={() => setShowAddStock(false)}>Cancel</Button>
+            <Button disabled={savingAddStock || !ownerOptions.length} onClick={handleAddStock}>
+              {savingAddStock ? 'Saving...' : 'Save'}
             </Button>
           </>
         )}
       >
         <div className="space-y-4">
-          <p className="text-sm text-gray-600">
-            Add or set stock for <strong>Company</strong>, <strong>Thabit</strong>, or another owner without editing products one by one.
-          </p>
-
-          {!ownerOptions.length ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              No inventory owners found. Add Company / Thabit owners first.
-            </div>
-          ) : (
-            <>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Owner</label>
-                  <Select
-                    value={bulkStockUpdate.ownerId}
-                    onChange={(event) => setBulkStockUpdate((value) => ({ ...value, ownerId: event.target.value }))}
-                    options={[{ value: '', label: 'Select owner' }, ...ownerOptions]}
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Update type</label>
-                  <Select
-                    value={bulkStockUpdate.mode}
-                    onChange={(event) => setBulkStockUpdate((value) => ({ ...value, mode: event.target.value as 'add' | 'set' }))}
-                    options={[
-                      { value: 'add', label: 'Add to current owner stock' },
-                      { value: 'set', label: 'Set owner stock to exact amount' }
-                    ]}
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Quantity</label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={bulkStockUpdate.quantity}
-                    onChange={(event) => setBulkStockUpdate((value) => ({ ...value, quantity: Number(event.target.value) || 0 }))}
-                    placeholder="e.g. 10"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Apply to</label>
-                  <Select
-                    value={bulkStockUpdate.scope}
-                    onChange={(event) => setBulkStockUpdate((value) => ({ ...value, scope: event.target.value as 'filtered' | 'all' }))}
-                    options={[
-                      { value: 'filtered', label: `Current results (${filteredProducts.length})` },
-                      { value: 'all', label: `All products (${products.length})` }
-                    ]}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">Search products in this list</label>
-                <Input
-                  type="text"
-                  value={bulkStockUpdate.productSearch}
-                  onChange={(event) => setBulkStockUpdate((value) => ({ ...value, productSearch: event.target.value }))}
-                  placeholder="Filter by name, code, or brand"
-                />
-              </div>
-
-              <div className="flex items-center justify-between gap-3 text-sm">
-                <span className="text-gray-500">
-                  Selected {selectedStockProductIds.length} of {bulkStockCandidates.length}
-                </span>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    className="font-medium text-emerald-700 hover:text-emerald-800"
-                    onClick={() => setSelectedStockProductIds(bulkStockCandidates.map((product) => product.id))}
-                  >
-                    Select all
-                  </button>
-                  <button
-                    type="button"
-                    className="font-medium text-gray-600 hover:text-gray-800"
-                    onClick={() => setSelectedStockProductIds([])}
-                  >
-                    Clear
-                  </button>
-                </div>
-              </div>
-
-              <div className="max-h-72 overflow-y-auto rounded-md border border-gray-200">
-                {bulkStockCandidates.length === 0 ? (
-                  <div className="px-3 py-6 text-center text-sm text-gray-500">No products match this search.</div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Product</label>
+            <Input
+              type="text"
+              value={addStockForm.productSearch}
+              onChange={(event) => {
+                setAddStockForm((value) => ({
+                  ...value,
+                  productSearch: event.target.value,
+                  productId: ''
+                }));
+                setAddStockError(null);
+              }}
+              placeholder="Search product name or code"
+            />
+            {selectedAddStockProduct && (
+              <p className="mt-1.5 text-sm text-emerald-700">
+                Selected: {selectedAddStockProduct.commercial_name} ({selectedAddStockProduct.code})
+              </p>
+            )}
+            {!selectedAddStockProduct && addStockForm.productSearch.trim() && (
+              <div className="mt-2 max-h-40 overflow-y-auto rounded-md border border-gray-200">
+                {addStockProductMatches.length === 0 ? (
+                  <p className="px-3 py-2 text-sm text-gray-500">No product found.</p>
                 ) : (
-                  <ul className="divide-y divide-gray-100">
-                    {bulkStockCandidates.map((product) => {
-                      const ownerQty = Number(
-                        (product.owner_stocks || []).find((stock) => stock.owner_id === bulkStockUpdate.ownerId)?.quantity || 0
-                      );
-                      const checked = selectedStockProductIds.includes(product.id);
-                      return (
-                        <li key={product.id}>
-                          <label className="flex cursor-pointer items-start gap-3 px-3 py-2.5 hover:bg-gray-50">
-                            <input
-                              type="checkbox"
-                              className="mt-1 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                              checked={checked}
-                              onChange={() => toggleStockProduct(product.id)}
-                            />
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-sm font-medium text-gray-900">{product.commercial_name}</span>
-                              <span className="block text-xs text-gray-500">
-                                {product.code} · total {product.current_stock || 0}
-                                {bulkStockUpdate.ownerId ? ` · owner ${ownerQty}` : ''}
-                              </span>
-                            </span>
-                          </label>
-                        </li>
-                      );
-                    })}
-                  </ul>
+                  addStockProductMatches.map((product) => (
+                    <button
+                      key={product.id}
+                      type="button"
+                      className="block w-full border-b border-gray-100 px-3 py-2 text-left last:border-b-0 hover:bg-gray-50"
+                      onClick={() => {
+                        setAddStockForm((value) => ({
+                          ...value,
+                          productId: product.id,
+                          productSearch: `${product.commercial_name} (${product.code})`
+                        }));
+                        setAddStockError(null);
+                      }}
+                    >
+                      <span className="block text-sm font-medium text-gray-900">{product.commercial_name}</span>
+                      <span className="block text-xs text-gray-500">{product.code} · stock {product.current_stock || 0}</span>
+                    </button>
+                  ))
                 )}
               </div>
-            </>
+            )}
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">This stock is for</label>
+            <Select
+              value={addStockForm.ownerId}
+              onChange={(event) => {
+                setAddStockForm((value) => ({ ...value, ownerId: event.target.value }));
+                setAddStockError(null);
+              }}
+              options={[{ value: '', label: 'Choose Company or Thabit' }, ...ownerOptions]}
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Quantity to add</label>
+            <Input
+              type="number"
+              min={1}
+              value={addStockForm.quantity}
+              onChange={(event) => {
+                setAddStockForm((value) => ({ ...value, quantity: Number(event.target.value) || 0 }));
+                setAddStockError(null);
+              }}
+              placeholder="e.g. 10"
+            />
+          </div>
+
+          {addStockError && (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {addStockError}
+            </div>
           )}
         </div>
       </Modal>
