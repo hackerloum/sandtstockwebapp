@@ -278,31 +278,34 @@ export const addOwnerStockToProduct = async (
     0
   );
 
-  const [{ error: upsertError }, productUpdate] = await Promise.all([
-    client
-      .from('product_owner_stocks')
-      .upsert(
-        {
-          product_id: product.id,
-          owner_id: owner.id,
-          quantity: nextOwnerQty,
-          updated_at: new Date().toISOString()
-        },
-        { onConflict: 'product_id,owner_id' }
-      ),
-    client
-      .from('products')
-      .update({
-        current_stock: nextTotal,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', product.id)
-      .select('id, code, commercial_name, current_stock, updated_at')
-      .single()
-  ]);
+  const performedAt = new Date().toISOString();
 
-  if (upsertError) throw upsertError;
-  if (productUpdate.error) throw productUpdate.error;
+  // Insert stock movement so Product timeline shows "Stock received".
+  // Triggers update product_owner_stocks and products.current_stock — do not write those here.
+  const { data: movement, error: movementError } = await client
+    .from('stock_movements')
+    .insert({
+      product_id: product.id,
+      batch_id: null,
+      owner_id: owner.id,
+      movement_type: 'in',
+      quantity,
+      reason: `Stock added for ${owner.name}`,
+      reference_number: null,
+      notes: null,
+      performed_by: null,
+      performed_at: performedAt
+    })
+    .select()
+    .single();
+
+  if (movementError) throw movementError;
+
+  const { data: productRow } = await client
+    .from('products')
+    .select('id, code, commercial_name, current_stock, updated_at')
+    .eq('id', product.id)
+    .single();
 
   void recordActivity(client, {
     action: 'add_owner_stock',
@@ -315,14 +318,15 @@ export const addOwnerStockToProduct = async (
       owner_name: owner.name,
       quantity_added: quantity,
       owner_stock_after: nextOwnerQty,
-      current_stock: nextTotal
+      current_stock: productRow?.current_stock ?? nextTotal,
+      movement_id: movement?.id || null
     }
   });
 
   return {
     ...product,
-    ...(productUpdate.data || {}),
-    current_stock: productUpdate.data?.current_stock ?? nextTotal,
+    ...(productRow || {}),
+    current_stock: productRow?.current_stock ?? nextTotal,
     owner_stocks: nextOwnerStocks
   } as Product;
 };

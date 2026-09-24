@@ -135,7 +135,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       };
     });
 
-    const activityEntries = productActivities.map((activity) => {
+    // Skip add_owner_stock activities — the matching stock_movement already shows as "Stock received".
+    const activityEntries = productActivities
+      .filter((activity) => activity.action !== 'add_owner_stock')
+      .map((activity) => {
       const details = activity.details && typeof activity.details === 'object'
         ? activity.details as Record<string, unknown>
         : {};
@@ -143,6 +146,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
         ? details.after as Record<string, unknown>
         : {};
       const afterStock = Number(after.current_stock ?? details.current_stock ?? product.current_stock);
+
       return {
         id: `activity-${activity.id}`,
         kind: 'activity' as const,
