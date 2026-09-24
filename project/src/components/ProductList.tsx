@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Product, ProductOwnerStock } from '../types';
-import { updateProduct } from '../lib/supabase';
+import { Product } from '../types';
+import { updateProduct, addOwnerStockToProduct } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { exportFilteredProductsToExcel, exportProductsToExcel } from '../utils/excelUtils';
 import { downloadInStockInventoryPdf } from '../utils/pdfUtils';
@@ -474,56 +474,8 @@ export const ProductList: React.FC<ProductListProps> = ({
     setAddStockError(null);
 
     try {
-      const nextOwnerStocks: ProductOwnerStock[] = [...(product.owner_stocks || [])];
-      const existingIndex = nextOwnerStocks.findIndex((stock) => stock.owner_id === owner.id);
-      const currentOwnerQty = existingIndex >= 0 ? Number(nextOwnerStocks[existingIndex].quantity || 0) : 0;
-      const nextOwnerQty = currentOwnerQty + quantity;
-
-      if (existingIndex >= 0) {
-        nextOwnerStocks[existingIndex] = {
-          ...nextOwnerStocks[existingIndex],
-          quantity: nextOwnerQty,
-          owner: {
-            id: owner.id,
-            name: owner.name,
-            owner_type: owner.owner_type,
-            is_default: owner.is_default
-          }
-        };
-      } else {
-        nextOwnerStocks.push({
-          product_id: product.id,
-          owner_id: owner.id,
-          quantity: nextOwnerQty,
-          owner: {
-            id: owner.id,
-            name: owner.name,
-            owner_type: owner.owner_type,
-            is_default: owner.is_default
-          }
-        });
-      }
-
-      const nextTotal = nextOwnerStocks.reduce(
-        (sum, stock) => sum + Math.max(0, Math.floor(Number(stock.quantity) || 0)),
-        0
-      );
-
-      const updated = await updateProduct(product.id, {
-        current_stock: nextTotal,
-        owner_stocks: nextOwnerStocks,
-        updated_by: user?.id || null
-      });
-
-      if (updated && onUpdateProduct) {
-        onUpdateProduct({
-          ...product,
-          ...updated,
-          current_stock: updated.current_stock ?? nextTotal,
-          owner_stocks: updated.owner_stocks || nextOwnerStocks
-        } as Product);
-      }
-
+      const updated = await addOwnerStockToProduct(product, owner, quantity);
+      if (onUpdateProduct) onUpdateProduct(updated);
       setShowAddStock(false);
       window.alert(`Added ${quantity} to ${owner.name} for ${product.commercial_name}.`);
     } catch (error) {

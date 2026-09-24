@@ -186,20 +186,22 @@ const recordActivity = async (
 const syncProductOwnerStocks = async (
   productId: string,
   ownerStocks: ProductOwnerStock[] | undefined,
-  client = createServiceRoleClient()
+  client = createServiceRoleClient(),
+  options?: { skipProductStockUpdate?: boolean }
 ) => {
   if (!ownerStocks) return;
 
-  const defaultOwner = await ensureDefaultInventoryOwner(client);
+  const hasOwnerIds = ownerStocks.every((stock) => Boolean(stock.owner_id));
+  const defaultOwner = hasOwnerIds ? null : await ensureDefaultInventoryOwner(client);
   const normalized = ownerStocks
     .map((stock) => ({
       product_id: productId,
-      owner_id: stock.owner_id || defaultOwner.id,
+      owner_id: stock.owner_id || defaultOwner!.id,
       quantity: Math.max(0, Math.floor(Number(stock.quantity) || 0))
     }))
     .filter((stock) => stock.owner_id);
 
-  if (!normalized.some((stock) => stock.owner_id === defaultOwner.id)) {
+  if (defaultOwner && !normalized.some((stock) => stock.owner_id === defaultOwner.id)) {
     normalized.push({ product_id: productId, owner_id: defaultOwner.id, quantity: 0 });
   }
 
@@ -210,13 +212,17 @@ const syncProductOwnerStocks = async (
   if (upsertError) throw upsertError;
 
   const activeOwnerIds = normalized.map((stock) => stock.owner_id);
-  const { error: deleteError } = await client
-    .from('product_owner_stocks')
-    .delete()
-    .eq('product_id', productId)
-    .not('owner_id', 'in', `(${activeOwnerIds.join(',')})`);
+  if (activeOwnerIds.length > 0) {
+    const { error: deleteError } = await client
+      .from('product_owner_stocks')
+      .delete()
+      .eq('product_id', productId)
+      .not('owner_id', 'in', `(${activeOwnerIds.join(',')})`);
 
-  if (deleteError) throw deleteError;
+    if (deleteError) throw deleteError;
+  }
+
+  if (options?.skipProductStockUpdate) return;
 
   const total = normalized.reduce((sum, stock) => sum + stock.quantity, 0);
   const { error: productStockError } = await client
@@ -225,6 +231,100 @@ const syncProductOwnerStocks = async (
     .eq('id', productId);
 
   if (productStockError) throw productStockError;
+};
+
+/** Fast path: add quantity to one owner on one product (2 DB calls). */
+export const addOwnerStockToProduct = async (
+  product: Product,
+  owner: Pick<InventoryOwner, 'id' | 'name' | 'owner_type' | 'is_default'>,
+  quantityToAdd: number
+): Promise<Product> => {
+  const client = createServiceRoleClient();
+  const quantity = Math.max(0, Math.floor(Number(quantityToAdd) || 0));
+  if (quantity <= 0) throw new Error('Quantity must be greater than zero');
+
+  const nextOwnerStocks: ProductOwnerStock[] = [...(product.owner_stocks || [])];
+  const existingIndex = nextOwnerStocks.findIndex((stock) => stock.owner_id === owner.id);
+  const currentOwnerQty = existingIndex >= 0 ? Number(nextOwnerStocks[existingIndex].quantity || 0) : 0;
+  const nextOwnerQty = currentOwnerQty + quantity;
+
+  if (existingIndex >= 0) {
+    nextOwnerStocks[existingIndex] = {
+      ...nextOwnerStocks[existingIndex],
+      quantity: nextOwnerQty,
+      owner: {
+        id: owner.id,
+        name: owner.name,
+        owner_type: owner.owner_type,
+        is_default: owner.is_default
+      }
+    };
+  } else {
+    nextOwnerStocks.push({
+      product_id: product.id,
+      owner_id: owner.id,
+      quantity: nextOwnerQty,
+      owner: {
+        id: owner.id,
+        name: owner.name,
+        owner_type: owner.owner_type,
+        is_default: owner.is_default
+      }
+    });
+  }
+
+  const nextTotal = nextOwnerStocks.reduce(
+    (sum, stock) => sum + Math.max(0, Math.floor(Number(stock.quantity) || 0)),
+    0
+  );
+
+  const [{ error: upsertError }, productUpdate] = await Promise.all([
+    client
+      .from('product_owner_stocks')
+      .upsert(
+        {
+          product_id: product.id,
+          owner_id: owner.id,
+          quantity: nextOwnerQty,
+          updated_at: new Date().toISOString()
+        },
+        { onConflict: 'product_id,owner_id' }
+      ),
+    client
+      .from('products')
+      .update({
+        current_stock: nextTotal,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', product.id)
+      .select('id, code, commercial_name, current_stock, updated_at')
+      .single()
+  ]);
+
+  if (upsertError) throw upsertError;
+  if (productUpdate.error) throw productUpdate.error;
+
+  void recordActivity(client, {
+    action: 'add_owner_stock',
+    entity_type: 'product',
+    entity_id: product.id,
+    details: {
+      name: product.commercial_name,
+      code: product.code,
+      owner_id: owner.id,
+      owner_name: owner.name,
+      quantity_added: quantity,
+      owner_stock_after: nextOwnerQty,
+      current_stock: nextTotal
+    }
+  });
+
+  return {
+    ...product,
+    ...(productUpdate.data || {}),
+    current_stock: productUpdate.data?.current_stock ?? nextTotal,
+    owner_stocks: nextOwnerStocks
+  } as Product;
 };
 
 /** Map joined order_items + product embed into app OrderItem (coerce decimals, name from join). */
@@ -1042,100 +1142,50 @@ export const updateProduct = async (id: string, updates: Partial<Database['publi
     ...cleanedUpdates,
     updated_at: new Date().toISOString()
   };
-  const snapshotClient = createServiceRoleClient();
-  const { data: beforeProduct } = await snapshotClient
-    .from('products')
-    .select('id, code, commercial_name, current_stock, updated_at')
-    .eq('id', id)
-    .maybeSingle();
-  
+
   console.log('Final update data:', updateData);
   
   try {
-    // Try with anon key first
-    const { data, error } = await supabase
+    // Go straight to service role (anon RLS usually blocks product updates)
+    const serviceRoleClient = createServiceRoleClient();
+    const { data: updatedProduct, error: serviceError } = await serviceRoleClient
       .from('products')
       .update(updateData)
       .eq('id', id)
       .select()
       .single();
-    
-    if (error) {
-      console.error('Anon key update failed:', error);
-      console.error('Error details:', {
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        code: error.code
-      });
-      
-      // Fallback: try with service role client (bypass RLS)
-      const serviceRoleClient = createClient(
-        supabaseUrl,
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxqa3Z3YWR1cXZhY21ydnljc2hqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MzkxMTcxOCwiZXhwIjoyMDY5NDg3NzE4fQ.yTH08Ylnmyh7Dcgy8QaQgABZrTG1LPylK1ET_MGLvlw'
-      );
-      
-      console.log('Trying service role client update...');
-      const { data: updatedProduct, error: serviceError } = await serviceRoleClient
-        .from('products')
-        .update(updateData)
-        .eq('id', id)
-        .select()
-        .single();
-      
-      if (serviceError) {
-        console.error('Service role update also failed:', serviceError);
-        console.error('Service role error details:', {
-          message: serviceError.message,
-          details: serviceError.details,
-          hint: serviceError.hint,
-          code: serviceError.code
-        });
-        throw serviceError;
-      }
-      
-      console.log('Product updated successfully (service role):', updatedProduct);
-      if ('current_stock' in updates) {
-        console.log('Stock update confirmed - new current_stock:', updatedProduct.current_stock);
-      }
-    await syncProductOwnerStocks(id, ownerStocks, serviceRoleClient);
-    const [withOwnerStocks] = await attachOwnerStocksToProducts([updatedProduct as Product], serviceRoleClient);
-    await recordActivity(serviceRoleClient, {
+
+    if (serviceError) {
+      console.error('Service role update failed:', serviceError);
+      throw serviceError;
+    }
+
+    if (ownerStocks) {
+      await syncProductOwnerStocks(id, ownerStocks, serviceRoleClient, { skipProductStockUpdate: true });
+    }
+
+    const withOwnerStocks = ownerStocks
+      ? ({
+          ...updatedProduct,
+          current_stock: (updateData as { current_stock?: number }).current_stock ?? updatedProduct.current_stock,
+          owner_stocks: ownerStocks
+        } as Product)
+      : (await attachOwnerStocksToProducts([updatedProduct as Product], serviceRoleClient))[0];
+
+    void recordActivity(serviceRoleClient, {
       action: 'update_product',
       entity_type: 'product',
       entity_id: id,
       details: {
         name: withOwnerStocks?.commercial_name || updatedProduct.commercial_name,
         code: withOwnerStocks?.code || updatedProduct.code,
-        before: beforeProduct || null,
         after: {
           current_stock: withOwnerStocks?.current_stock ?? updatedProduct.current_stock,
           owner_stocks: withOwnerStocks?.owner_stocks || []
         }
       }
     });
-    return withOwnerStocks;
-  }
-    
-    console.log('Product updated successfully (anon key):', data);
-    if ('current_stock' in updates) {
-      console.log('Stock update confirmed - new current_stock:', data.current_stock);
-    }
-    await syncProductOwnerStocks(id, ownerStocks);
-    const [withOwnerStocks] = await attachOwnerStocksToProducts([data as Product]);
-    await recordActivity(createServiceRoleClient(), {
-      action: 'update_product',
-      entity_type: 'product',
-      entity_id: id,
-      details: {
-        name: withOwnerStocks?.commercial_name || data.commercial_name,
-        code: withOwnerStocks?.code || data.code,
-        after: {
-          current_stock: withOwnerStocks?.current_stock ?? data.current_stock,
-          owner_stocks: withOwnerStocks?.owner_stocks || []
-        }
-      }
-    });
+
     return withOwnerStocks;
   } catch (err) {
     console.error('Error in updateProduct:', err);
